@@ -24,6 +24,7 @@ export class SaphiraVoice {
   kokoroVoice = 'af_heart';
   private kokoroCancel = 0;
   private kokoroSources: AudioBufferSourceNode[] = [];
+  private kokoroPlaying = false;
   private ctx: AudioContext | null = null;
   private src: AudioBufferSourceNode | null = null;
   private seq = 0;
@@ -47,7 +48,7 @@ export class SaphiraVoice {
     }catch{}
   }
 
-  get speaking(){ return !!this.src; }
+  get speaking(){ return !!this.src || this.kokoroPlaying; }
   get lastFailure(): TTSFailure { return this.failure; }
 
   setAiVoice(name:string){ this.voice=name; }
@@ -95,6 +96,9 @@ export class SaphiraVoice {
     if(this.kokoroEnabled && window.saphiraDesktop){
       const ctx=this.ensureCtx();
       if(!ctx){ this.failure='other'; return false; }
+      // the Gemini path resumes here too — chat replies can come from timers
+      // (chatter, alarms) with no recent gesture, and a suspended context is silent
+      try{ if(ctx.state==='suspended') ctx.resume().catch(()=>{}); }catch{}
       return await this.speakKokoro(clean, my, ctx);
     }
     const key=this.getKey().trim();
@@ -168,17 +172,17 @@ export class SaphiraVoice {
       const voice = this.kokoroVoice;
       const rate = this.rate;
       let scheduledUntil = 0;
-      let chunkSeen = false;
       let finished = false;
+      this.kokoroPlaying = true;
       const finish=(ok:boolean)=>{
         if(finished) return; finished=true;
+        this.kokoroPlaying=false;
         off();
         if(my===this.seq){ this.src=null; this.onStatus('idle'); }
         resolve(ok);
       };
       const off = window.saphiraDesktop!.onTtsChunk(({reqId:rid, pcm, rate:srate, last})=>{
         if(rid!==reqId || cancel!==this.kokoroCancel || finished) return;
-        chunkSeen=true;
         try{
           const buf=ctx.createBuffer(1, pcm.length, srate);
           const ch=buf.getChannelData(0);
@@ -191,7 +195,7 @@ export class SaphiraVoice {
           src.connect(ctx.destination);
           src.onended=()=>{
             const i=this.kokoroSources.indexOf(src); if(i>=0) this.kokoroSources.splice(i,1);
-            if(last && this.kokoroSources.filter(s=>s===src).length===0 && scheduledUntil<=at+0.1) finish(true);
+            if(last && this.kokoroSources.length===0) finish(true);
           };
           src.start(at);
           this.kokoroSources.push(src);
@@ -199,14 +203,13 @@ export class SaphiraVoice {
           if(last) window.setTimeout(()=>{ if(!finished && this.kokoroSources.length===0) finish(true); }, Math.ceil(buf.duration/pr*1000)+400);
         }catch{}
       });
-      // no audio ever came back (e.g. voice files missing) — treat as spoken
-      // so the conversation still works, she just lip-syncs silently
-      window.setTimeout(()=>{ if(!finished && !chunkSeen) finish(true); }, 4000);
-      window.setTimeout(()=>{ if(!finished) finish(true); }, 30000+text.length*400);
+      // the synthesis promise covers engine warm-up (first use loads the model,
+      // which can take seconds — a timeout here would drop every chunk after it)
+      window.setTimeout(()=>{ if(!finished) finish(true); }, 120000+text.length*400);
       this.onStatus('speaking');
       void window.saphiraDesktop!.ttsSynthesize(reqId, text, {voice, rate}).then((res)=>{
         if(res && res.ok===false && !finished){ this.failure='other'; finish(false); }
-      }).catch(()=>{ if(!finished && !chunkSeen){ this.failure='other'; finish(false); } });
+      }).catch(()=>{ if(!finished){ this.failure='other'; finish(false); } });
     });
   }
 

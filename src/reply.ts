@@ -15,6 +15,12 @@ const VALID_EXPR = new Set(['neutral','happy','excited','sad','surprised','think
 const VALID_GEST = new Set(['none','wave','nod','shrug','piano']);
 
 export function parseReply(raw:string): SaphiraReply {
+  // reasoning models wrap output in <think> blocks — never let that reach the
+  // parser or her voice
+  raw = String(raw||'')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/i, '')
+    .trim();
   let j:any=null;
   try{ j = JSON.parse(raw); }catch{
     // try extract json block

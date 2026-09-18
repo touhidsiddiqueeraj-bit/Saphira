@@ -281,7 +281,8 @@ async function ensureServer(): Promise<number> {
       stopServer(); // kill any previous instance (model may differ)
       const bin = await ensureServerBinary();
       const port = await freePort(18963);
-      const args = ['-m', modelPath, '-c', '8192', '--port', String(port), '--host', '127.0.0.1', '--no-webui', '--jinja'];
+      const args = ['-m', modelPath, '-c', '8192', '--port', String(port), '--host', '127.0.0.1', '--no-webui', '--jinja',
+        '--reasoning-budget', '0']; // she must answer fast, not think — thinking burns tokens before the JSON
       if (engineGpu) args.push('-ngl', '99', '--flash-attn', 'on');
       const mmproj = findInDirs(entry.mmprojFile, entry.mmprojBytes);
       if (mmproj) args.push('--mmproj', mmproj);

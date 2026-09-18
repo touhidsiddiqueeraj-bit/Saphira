@@ -389,6 +389,8 @@ function wire(){
   if(window.saphiraDesktop){
     tts.setKokoroEnabled(settings.ttsEngine==='kokoro');
     tts.setKokoroVoice(settings.kokoroVoice);
+    // warm her voice in the background so the first reply isn't delayed
+    void window.saphiraDesktop.ttsReady();
     // one-time voice download progress surfaces as a pill
     window.saphiraDesktop.onTtsEvent((e)=>{
       if(e.state==='downloading') flashLive(`Downloading her voice — ${Math.round((e.progress??0)*100)}%`, 1500);
@@ -397,6 +399,7 @@ function wire(){
     });
   }
   gemini = new GeminiClient(()=> settings.apiKey, ()=> settings.persona, settings.rpmLimit);
+  (window as any).__saphiraTTS = tts; // smoke/debug handle
 
   if(window.saphiraDesktop){
     // desktop: push-to-talk through the local Whisper engine — no wake word

@@ -197,6 +197,26 @@ function maybeRunSmoke(win: BrowserWindow): void {
               return { text: r.text, samplesIn: outLen, error: r.error || null };
             })()`).catch((e) => ({ error: String(e) }));
         }
+        // chat voice path: the REAL SaphiraVoice.speak() with a chat-length reply
+        if (process.env.SAPHIRA_SMOKE_CHATVOICE === '1') {
+          extra.chatVoice = await win.webContents.executeJavaScript(`
+            (async () => {
+              const tts = window.__saphiraTTS;
+              if (!tts) return { error: 'no tts handle' };
+              let chunks = 0, samples = 0, lastSeen = false, busySeen = false;
+              const off = window.saphiraDesktop.onTtsChunk(({ pcm, last }) => {
+                chunks++; samples += pcm.length;
+                if (last) lastSeen = true;
+              });
+              const t0 = performance.now();
+              const busyPoll = setInterval(() => {
+                if (document.getElementById('micBtn').classList.contains('busy')) busySeen = true;
+              }, 100);
+              const ok = await tts.speak('Hey there! I am speaking through my real chat voice path now. This sentence is long enough to be split into multiple chunks, just like an actual reply during our conversation.');
+              clearInterval(busyPoll); off();
+              return { ok, chunks, samples, lastSeen, busySeen, ms: Math.round(performance.now() - t0) };
+            })()`).catch((e) => ({ error: String(e) }));
+        }
         // kokoro voice: download model + synthesize a line, verify PCM streams back
         if (process.env.SAPHIRA_SMOKE_TTS === '1') {
           extra.tts = await win.webContents.executeJavaScript(`
