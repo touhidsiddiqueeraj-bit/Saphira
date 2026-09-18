@@ -21,6 +21,7 @@ export type Settings = {
   llmModelId: string;       // local: catalog id of the downloaded GGUF
   ttsEngine: 'kokoro' | 'browser'; // desktop: local Kokoro or OS voices
   kokoroVoice: string;      // desktop: Kokoro voice id
+  camera: boolean;          // desktop: let her see through the camera
 };
 
 const LS_KEY = 'saphira_settings_v2';
@@ -86,6 +87,7 @@ function defaults(): Settings {
     llmModelId: '',
     ttsEngine: 'kokoro',
     kokoroVoice: 'af_heart',
+    camera: false,
   };
 }
 // OpenAI-compatible providers that work with just a base URL + key + model id.
@@ -107,6 +109,7 @@ export function migrateSettings(s: Settings): Settings {
   if (typeof s.brainModel !== 'string') s.brainModel = '';
   if (typeof s.llmModelId !== 'string') s.llmModelId = '';
   s.ttsEngine = s.ttsEngine === 'browser' ? 'browser' : 'kokoro';
+  s.camera = s.camera === true;
   if (typeof s.kokoroVoice !== 'string' || !s.kokoroVoice) s.kokoroVoice = 'af_heart';
   return s;
 }

@@ -10,6 +10,7 @@ export type BrainChatPayload = {
   system: string;
   history: { role: 'user' | 'assistant'; content: string }[];
   user: string;
+  images?: string[];   // data URLs attached to the current user turn (vision)
 };
 
 type LocalChat = (p: BrainChatPayload) => Promise<string>;
@@ -20,10 +21,15 @@ export function setLocalChat(fn: LocalChat): void { localChat = fn; }
 
 export async function cloudChat(p: BrainChatPayload): Promise<string> {
   const base = (p.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  // vision turns use multipart content; plain text stays a plain string so
+  // text-only endpoints never see an unfamiliar shape
+  const userContent: any = p.images?.length
+    ? [{ type: 'text', text: p.user }, ...p.images.map((u) => ({ type: 'image_url', image_url: { url: u } }))]
+    : p.user;
   const messages = [
     { role: 'system', content: p.system },
     ...p.history,
-    { role: 'user', content: p.user },
+    { role: 'user', content: userContent },
   ];
   const call = (withJsonFormat: boolean) => net.fetch(base + '/chat/completions', {
     method: 'POST',

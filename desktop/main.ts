@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { registerModelIpc } from './modelStore.js';
 import { registerBrainIpc } from './brain.js';
-import { registerLlmIpc } from './llm.js';
+import { registerLlmIpc, shutdownLlm } from './llm.js';
 import { registerTtsIpc } from './tts.js';
 import { registerSttIpc } from './stt.js';
 
@@ -139,6 +139,32 @@ function maybeRunSmoke(win: BrowserWindow): void {
             })()`).catch((e) => ({ error: String(e) }));
           extra.localSeconds = Math.round((Date.now() - t0) / 1000);
         }
+        // gemma local brain: download model + mmproj + llama-server, chat text and vision
+        if (process.env.SAPHIRA_SMOKE_GEMMA === '1') {
+          const t0 = Date.now();
+          extra.gemma = await win.webContents.executeJavaScript(`
+            (async () => {
+              const dl = await window.saphiraDesktop.llmDownload('gemma-4-e4b');
+              const chat = await window.saphiraDesktop.brainChat({
+                mode: 'local',
+                system: 'You are Saphira. Always respond as JSON: {"text":"your reply","expression":"happy","intensity":0.7,"gesture":"none"}. Reply with ONLY the JSON object.',
+                history: [], user: 'Say hi in one short sentence.',
+              });
+              // draw a red circle on white — ask what color dominates
+              const c = document.createElement('canvas'); c.width = 320; c.height = 320;
+              const g = c.getContext('2d');
+              g.fillStyle = '#ffffff'; g.fillRect(0, 0, 320, 320);
+              g.fillStyle = '#e02020'; g.beginPath(); g.arc(160, 160, 110, 0, Math.PI * 2); g.fill();
+              const vis = await window.saphiraDesktop.brainChat({
+                mode: 'local',
+                system: 'You are Saphira. Always respond as JSON: {"text":"your reply","expression":"happy","intensity":0.7,"gesture":"none"}. Reply with ONLY the JSON object.',
+                history: [], user: 'What color is the circle in this image?',
+                images: [c.toDataURL('image/png')],
+              });
+              return { dl, chat: chat.text, vision: vis.text };
+            })()`).catch((e) => ({ error: String(e) }));
+          extra.gemmaSeconds = Math.round((Date.now() - t0) / 1000);
+        }
         // whisper ears: kokoro speaks a line → downsample → transcribe it back
         if (process.env.SAPHIRA_SMOKE_STT === '1') {
           extra.stt = await win.webContents.executeJavaScript(`
@@ -257,3 +283,4 @@ void app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => { app.quit(); });
+app.on('before-quit', () => { shutdownLlm(); });

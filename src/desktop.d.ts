@@ -24,6 +24,7 @@ export type BrainChatPayload = {
   system: string;        // persona + JSON contract
   history: { role: 'user' | 'assistant'; content: string }[];
   user: string;
+  images?: string[]; // data URLs for vision turns
 };
 export type TtsOpts = { voice: string; rate: number };
 

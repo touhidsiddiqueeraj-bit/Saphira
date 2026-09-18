@@ -3,6 +3,11 @@
   "private": true,
   "version": "1.0.0",
   "description": "Saphira — desktop companion with fully-local AI (brain, voice, ears)",
+  "author": {
+    "name": "touhid",
+    "email": "touhidsiddiqueeraj@gmail.com"
+  },
+  "homepage": "https://github.com/touhidsiddiqueeraj-bit/Saphira-Air#readme",
   "type": "module",
   "main": "build/desktop/main.js",
   "scripts": {
@@ -16,21 +21,17 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
+    "adm-zip": "^0.5.16",
     "kokoro-js": "^1.2.1",
-    "node-llama-cpp": "^3.21.1",
     "three": "^0.160.1"
   },
-  "author": {
-    "name": "touhid",
-    "email": "touhidsiddiqueeraj@gmail.com"
-  },
   "devDependencies": {
-    "electron": "^37.10.3",
-    "electron-builder": "^26.15.3",
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^22.10.0",
+    "@types/three": "^0.160.0",
+    "electron": "^37.7.1",
+    "electron-builder": "^26.0.12",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0",
-    "@types/node": "^22.20.3",
-    "@types/three": "^0.160.0"
-  },
-  "homepage": "https://github.com/touhidsiddiqueeraj-bit/Saphira-Air#readme"
+    "vite": "^5.4.11"
+  }
 }
