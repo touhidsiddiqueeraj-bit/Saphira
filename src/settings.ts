@@ -14,6 +14,13 @@ export type Settings = {
   piano: boolean;  // piano performances (animation + melody)
   pianoEveryMinutes: number;  // autonomous cooldown between performances
   pianoLengthSeconds: number; // performance length
+  brain: 'cloud' | 'local'; // desktop: which brain answers
+  brainPreset: string;      // cloud: selected provider preset id
+  brainBaseUrl: string;     // cloud: OpenAI-compatible base URL (…/v1)
+  brainModel: string;       // cloud: model id at that provider
+  llmModelId: string;       // local: catalog id of the downloaded GGUF
+  ttsEngine: 'kokoro' | 'browser'; // desktop: local Kokoro or OS voices
+  kokoroVoice: string;      // desktop: Kokoro voice id
 };
 
 const LS_KEY = 'saphira_settings_v2';
@@ -72,8 +79,38 @@ function defaults(): Settings {
     piano: true,
     pianoEveryMinutes: 5,
     pianoLengthSeconds: 30,
+    brain: 'cloud',
+    brainPreset: 'openai',
+    brainBaseUrl: 'https://api.openai.com/v1',
+    brainModel: 'gpt-4o-mini',
+    llmModelId: '',
+    ttsEngine: 'kokoro',
+    kokoroVoice: 'af_heart',
   };
 }
+// OpenAI-compatible providers that work with just a base URL + key + model id.
+// Gemini's own OpenAI-compat endpoint means her old key still works here.
+export const BRAIN_PRESETS: { id: string; label: string; baseUrl: string; model: string; keyless?: boolean }[] = [
+  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { id: 'gemini', label: 'Google Gemini (OpenAI-compatible)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-flash-lite-latest' },
+  { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: '' },
+  { id: 'ollama', label: 'Ollama (this machine)', baseUrl: 'http://localhost:11434/v1', model: '', keyless: true },
+  { id: 'lmstudio', label: 'LM Studio (this machine)', baseUrl: 'http://localhost:1234/v1', model: '', keyless: true },
+  { id: 'custom', label: 'Custom — any OpenAI-compatible URL', baseUrl: '', model: '' },
+];
+
+// clamp + fill the desktop fields when older saves lack them
+export function migrateSettings(s: Settings): Settings {
+  s.brain = s.brain === 'local' ? 'local' : 'cloud';
+  if (!s.brainBaseUrl) { s.brainBaseUrl = 'https://api.openai.com/v1'; }
+  if (typeof s.brainModel !== 'string') s.brainModel = '';
+  if (typeof s.llmModelId !== 'string') s.llmModelId = '';
+  s.ttsEngine = s.ttsEngine === 'browser' ? 'browser' : 'kokoro';
+  if (typeof s.kokoroVoice !== 'string' || !s.kokoroVoice) s.kokoroVoice = 'af_heart';
+  return s;
+}
+
 // live reads for the audio modules — default on
 export function voiceOn(): boolean {
   try{ return loadSettings().voice !== false; }catch{ return true; }

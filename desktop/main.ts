@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { registerModelIpc } from './modelStore.js';
+import { registerBrainIpc } from './brain.js';
 
 // app:// is a standard, secure, fetch-capable scheme so the renderer's
 // root-absolute paths (/model/ai_ohto.glb, /bg.jpg, /audio/…) resolve inside
@@ -94,18 +95,30 @@ function maybeRunSmoke(win: BrowserWindow): void {
   win.webContents.on('console-message', (_e, _level, message) => errors.push(String(message).slice(0, 300)));
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => {
-      void win.webContents.executeJavaScript(`({
+      const mockBrain = process.env.SAPHIRA_MOCK_BRAIN === '1'
+        ? startMockBrain().then((port) => win.webContents.executeJavaScript(`
+            (async () => {
+              const r = await window.saphiraDesktop.brainChat({
+                mode: 'cloud', baseUrl: 'http://127.0.0.1:${port}', apiKey: 'smoke', model: 'mock',
+                system: 'test', history: [], user: 'hi',
+              });
+              return r.text;
+            })()`).then((t) => ({ mockBrainReply: t, mockBrainOk: t.includes('Mock brain here.') }))
+          ) : Promise.resolve({});
+      void mockBrain.then((extra) => win.webContents.executeJavaScript(`({
         title: document.title,
         hasCanvas: !!document.getElementById('c'),
         hasInput: !!document.getElementById('chatInput'),
         hasMic: !!document.getElementById('micBtn'),
         hasGear: !!document.getElementById('gear'),
+        brainSectionVisible: (() => { const b = document.getElementById('brainSection'); return !!b && b.style.display !== 'none'; })(),
+        brainPresetCount: (document.getElementById('brainPreset')?.options || []).length,
         bubble: document.querySelector('.bubble')?.textContent?.slice(0, 80) || null,
         avatar: typeof window.__saphiraAvatar === 'object' && window.__saphiraAvatar !== null,
         debug: window.__saphiraAvatar?.debugInfo?.() || null,
       })`).then(async (facts) => {
         fs.mkdirSync(path.dirname(out), { recursive: true });
-        fs.writeFileSync(out, JSON.stringify({ ok: true, facts, errors }, null, 2));
+        fs.writeFileSync(out, JSON.stringify({ ok: true, facts: { ...facts, ...extra }, errors }, null, 2));
         try {
           const img = await win.webContents.capturePage();
           fs.writeFileSync(out.replace(/\.json$/, '.png'), img.toPNG());
@@ -113,7 +126,7 @@ function maybeRunSmoke(win: BrowserWindow): void {
       }).catch((e) => {
         fs.mkdirSync(path.dirname(out), { recursive: true });
         fs.writeFileSync(out, JSON.stringify({ ok: false, error: String(e), errors }, null, 2));
-      }).finally(() => app.quit());
+      }).finally(() => app.quit()));
     }, 9000);
   });
 }
@@ -136,6 +149,19 @@ function registerMiscIpc(): void {
   ipcMain.handle('app:version', () => app.getVersion());
 }
 
+// SAPHIRA_MOCK_BRAIN=1: a localhost OpenAI-compatible stub so smoke tests can
+// exercise the full renderer→preload→IPC→brain→reply chain with no API key.
+const MOCK_REPLY = JSON.stringify({ text: 'Hello! Mock brain here.', expression: 'happy', intensity: 0.8, gesture: 'none' });
+async function startMockBrain(): Promise<number> {
+  const http = await import('node:http');
+  const srv = http.createServer((_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: MOCK_REPLY } }] }));
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return (srv.address() as any).port as number;
+}
+
 void app.whenReady().then(async () => {
   registerAppProtocol();
   // mic for push-to-talk; deny the rest by default
@@ -145,6 +171,7 @@ void app.whenReady().then(async () => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media' || permission === 'fullscreen');
   registerMiscIpc();
   registerModelIpc();
+  registerBrainIpc();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
