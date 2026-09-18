@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('saphiraDesktop', {
   llmStatus: () => ipcRenderer.invoke('llm:status'),
   llmDownload: (modelId: string) => ipcRenderer.invoke('llm:download', modelId),
   llmSelect: (modelId: string) => ipcRenderer.invoke('llm:select', modelId),
+  llmGetDirs: () => ipcRenderer.invoke('llm:getDirs'),
+  llmBrowseDir: () => ipcRenderer.invoke('llm:browseDir'),
   onLlmEvent: on('llm:event'),
 
   // ---- kokoro tts ----

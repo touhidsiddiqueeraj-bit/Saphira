@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
@@ -16,16 +16,34 @@ import { setLocalChat, cloudChat, type BrainChatPayload } from './brain.js';
 const LLAMA_SERVER_DIR = () => path.join(llmDir(), 'llama-server');
 
 // known model libraries — the catalog resolves GGUFs from here first so
-// locally-stored models are used instead of re-downloading
-const MODEL_DIRS = [llmDir(), '/mnt/backup/llm-models'];
+// locally-stored models are used instead of re-downloading. The user can add
+// their own folder in settings (scan-dirs.json), so nothing is hardcoded.
+function scanDirs(): string[] {
+  const dirs = [llmDir()];
+  try {
+    const extra = JSON.parse(fs.readFileSync(path.join(llmDir(), 'scan-dirs.json'), 'utf8'));
+    for (const d of Array.isArray(extra) ? extra : []) {
+      if (typeof d === 'string' && d.trim()) dirs.push(d.trim());
+    }
+  } catch { /* no custom dirs yet */ }
+  return dirs;
+}
 
 function findInDirs(rel: string | undefined): string | null {
   if (!rel) return null;
-  for (const d of MODEL_DIRS) {
+  for (const d of scanDirs()) {
     const p = path.join(d, rel);
     try { if (fs.existsSync(p)) return p; } catch { /* dir missing */ }
   }
   return null;
+}
+
+// pick the catalog entry whose files we actually have, preferring the saved
+// choice — a stale active.json (model removed/renamed) must self-heal
+function resolveUsableEntry(): CatalogEntry | null {
+  const saved = CATALOG.find((c) => c.id === readActiveId());
+  if (saved && findInDirs(saved.file)) return saved;
+  return CATALOG.find((c) => findInDirs(c.file)) ?? null;
 }
 
 type CatalogEntry = {
@@ -229,10 +247,13 @@ async function ensureServer(): Promise<number> {
   if (bootPromise) return bootPromise.then(() => serverPort);
   bootPromise = (async () => {
     const seq = ++loadSeq;
-    const id = want!;
-    const entry = CATALOG.find((c) => c.id === id);
+    const entry = resolveUsableEntry();
+    const id = entry?.id ?? want!;
     const modelPath = entry ? findInDirs(entry.file) : null;
-    if (!entry || !modelPath) throw new Error('No local model downloaded yet');
+    if (!entry || !modelPath) {
+      throw new Error('No local model found — pick one in Settings, or add your models folder there');
+    }
+    if (entry.id !== want) writeActiveId(entry.id);
     transient.set(id, { state: 'loading' });
     emit({ type: 'state', modelId: id, state: 'loading' });
     try {
@@ -339,6 +360,26 @@ export function registerLlmIpc(): void {
     activeId: readActiveId(),
   }));
   ipcMain.handle('llm:download', (_e, modelId: string) => download(modelId));
+  ipcMain.handle('llm:getDirs', () => scanDirs().slice(1));
+  ipcMain.handle('llm:browseDir', async () => {
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Pick your models folder' });
+    if (r.canceled || !r.filePaths[0]) return { ok: false };
+    // remember it and rescan — any catalog GGUF inside becomes usable instantly
+    const cur = (() => { try { return JSON.parse(fs.readFileSync(path.join(llmDir(), 'scan-dirs.json'), 'utf8')); } catch { return []; } })();
+    const next = Array.from(new Set([...(Array.isArray(cur) ? cur : []), r.filePaths[0]]));
+    fs.mkdirSync(llmDir(), { recursive: true });
+    fs.writeFileSync(path.join(llmDir(), 'scan-dirs.json'), JSON.stringify(next, null, 2));
+    return { ok: true, dirs: next };
+  });
+  ipcMain.handle('llm:addDir', (_e, dir: string) => {
+    const clean = String(dir || '').trim();
+    if (!clean) return { ok: false, error: 'empty path' };
+    const cur = (() => { try { return JSON.parse(fs.readFileSync(path.join(llmDir(), 'scan-dirs.json'), 'utf8')); } catch { return []; } })();
+    const next = Array.from(new Set([...(Array.isArray(cur) ? cur : []), clean]));
+    fs.mkdirSync(llmDir(), { recursive: true });
+    fs.writeFileSync(path.join(llmDir(), 'scan-dirs.json'), JSON.stringify(next, null, 2));
+    return { ok: true, dirs: next };
+  });
   ipcMain.handle('llm:select', async (_e, modelId: string) => {
     if (!findInDirs(CATALOG.find((c) => c.id === modelId)?.file)) return { ok: false, error: 'model not downloaded' };
     writeActiveId(modelId);

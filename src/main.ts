@@ -547,6 +547,15 @@ function wire(){
     settings.aiVoice=(document.getElementById('aiVoice') as HTMLSelectElement).value || settings.aiVoice;
     tts.setAiVoice(settings.aiVoice);
     tts.setRate(parseFloat((document.getElementById('rate') as HTMLInputElement).value));
+    if(window.saphiraDesktop){
+      // apply exactly what the drawer shows right now — the engine + Kokoro
+      // voice pickers only persist on Save, but Test should sound like them
+      const esel=document.getElementById('ttsEngineSel') as HTMLSelectElement | null;
+      const vsel=document.getElementById('kokoroVoiceSel') as HTMLSelectElement | null;
+      const kokoro = !esel || esel.value!=='browser';
+      tts.setKokoroEnabled(kokoro);
+      if(vsel?.value){ settings.kokoroVoice=vsel.value; tts.setKokoroVoice(vsel.value); }
+    }
     tts.unlock();
     const ok=await tts.speak("Hi! I'm Saphira.");
     if(!ok) addBubble('bot', noVoiceMsg());
@@ -738,11 +747,32 @@ function setupLocalBrainUI(){
       row.appendChild(r2);
       box.appendChild(row);
     });
+    // models folder: point her at a directory of GGUFs instead of downloading
+    const dirRow=document.createElement('div'); dirRow.className='brain-row';
+    const dl=document.createElement('div'); dl.style.cssText='display:flex;gap:8px;align-items:center';
+    const browse=document.createElement('button'); browse.className='brain-mini'; browse.textContent='Add models folder…';
+    browse.addEventListener('click', async()=>{
+      browse.disabled=true;
+      const r=await window.saphiraDesktop!.llmBrowseDir();
+      browse.disabled=false;
+      if(r.ok) render();
+    });
+    dl.appendChild(browse);
+    dirRow.appendChild(dl);
+    try{
+      const dirs=await window.saphiraDesktop!.llmGetDirs();
+      if(dirs.length){
+        const lbl=document.createElement('div'); lbl.style.cssText='font-size:11px;opacity:.6;word-break:break-all';
+        lbl.textContent='Scanning: ' + dirs.join(', ');
+        dirRow.appendChild(lbl);
+      }
+    }catch{}
+    box.appendChild(dirRow);
     const hint=document.createElement('div');
     hint.style.cssText='font-size:12px;opacity:.6;line-height:1.5';
     hint.textContent = st.models.some(m=>m.state==='ready')
-      ? 'Runs fully offline once downloaded. First load takes a few seconds.'
-      : 'Pick one to download (~1–2 GB, one time). She then runs fully offline.';
+      ? 'Runs fully offline. First load of a brain takes a few seconds.'
+      : 'Download one, or point me at a folder that already has the GGUF files.';
     box.appendChild(hint);
   };
   void render();
@@ -1073,8 +1103,10 @@ async function handleUser(text:string, images?:string[]){
     thinkEl.remove();
     const msg=String(e.message||e).slice(0,700);
     const is429 = msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
-    const isNoBrain = msg.includes('Local brain not ready');
-    addBubble('bot', is429 ? 'Busy — try again in a bit.' : isNoBrain ? 'Pick a local brain in ⚙ settings first (or switch to a cloud one).' : 'Error — check key / network.');
+    const isNoBrain = /no local model|local brain not ready/i.test(msg);
+    addBubble('bot', is429 ? 'Busy — try again in a bit.'
+      : isNoBrain ? 'No local brain found — pick one in ⚙ settings (you can also point me at a models folder there).'
+      : `Brain error — ${msg.slice(0, 160)}`);
   } finally { isThinking=false; }
 }
 

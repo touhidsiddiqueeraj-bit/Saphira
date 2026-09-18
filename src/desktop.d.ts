@@ -37,6 +37,8 @@ export type SaphiraDesktopApi = {
   llmStatus(): Promise<LlmStatus>;
   llmDownload(modelId: string): Promise<{ ok: boolean; error?: string }>;
   llmSelect(modelId: string): Promise<{ ok: boolean; error?: string }>;
+  llmGetDirs(): Promise<string[]>;
+  llmBrowseDir(): Promise<{ ok: boolean; dirs?: string[] }>;
   onLlmEvent(cb: (e: { type: 'progress' | 'state'; modelId: string; progress?: number; state?: LlmModelState; error?: string }) => void): () => void;
   // ---- kokoro tts ----
   ttsSynthesize(reqId: number, text: string, opts: TtsOpts): Promise<{ ok: boolean; error?: string }>;
