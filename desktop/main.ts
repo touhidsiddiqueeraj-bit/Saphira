@@ -6,6 +6,7 @@ import { registerModelIpc } from './modelStore.js';
 import { registerBrainIpc } from './brain.js';
 import { registerLlmIpc } from './llm.js';
 import { registerTtsIpc } from './tts.js';
+import { registerSttIpc } from './stt.js';
 
 // app:// is a standard, secure, fetch-capable scheme so the renderer's
 // root-absolute paths (/model/ai_ohto.glb, /bg.jpg, /audio/…) resolve inside
@@ -138,6 +139,38 @@ function maybeRunSmoke(win: BrowserWindow): void {
             })()`).catch((e) => ({ error: String(e) }));
           extra.localSeconds = Math.round((Date.now() - t0) / 1000);
         }
+        // whisper ears: kokoro speaks a line → downsample → transcribe it back
+        if (process.env.SAPHIRA_SMOKE_STT === '1') {
+          extra.stt = await win.webContents.executeJavaScript(`
+            (async () => {
+              const ttsAudio = await new Promise((resolve) => {
+                let acc = [], rate = 0, lastSeen = false;
+                const off = window.saphiraDesktop.onTtsChunk(({pcm, rate: r, last}) => {
+                  acc.push(pcm); rate = r;
+                  if (last && !lastSeen) { lastSeen = true; off(); resolve({ acc, rate }); }
+                });
+                window.saphiraDesktop.ttsSynthesize(999, 'The weather is lovely today.', { voice: 'af_heart', rate: 1 })
+                  .catch(() => resolve(null));
+                setTimeout(() => resolve(null), 60000);
+              });
+              if (!ttsAudio) return { error: 'tts failed' };
+              const total = ttsAudio.acc.reduce((a, b) => a + b.length, 0);
+              const src24 = new Int16Array(total);
+              let o = 0;
+              for (const c of ttsAudio.acc) { src24.set(c, o); o += c.length; }
+              // 24k int16 → 16k float32 (linear resample)
+              const ratio = 24000 / 16000;
+              const outLen = Math.floor(total / ratio);
+              const pcm16k = new Float32Array(outLen);
+              for (let i = 0; i < outLen; i++) {
+                const x = i * ratio, i0 = Math.floor(x), fr = x - i0;
+                const a = src24[i0] / 32768, b = src24[Math.min(i0 + 1, total - 1)] / 32768;
+                pcm16k[i] = a + (b - a) * fr;
+              }
+              const r = await window.saphiraDesktop.sttTranscribe(pcm16k);
+              return { text: r.text, samplesIn: outLen, error: r.error || null };
+            })()`).catch((e) => ({ error: String(e) }));
+        }
         // kokoro voice: download model + synthesize a line, verify PCM streams back
         if (process.env.SAPHIRA_SMOKE_TTS === '1') {
           extra.tts = await win.webContents.executeJavaScript(`
@@ -218,6 +251,7 @@ void app.whenReady().then(async () => {
   registerBrainIpc();
   registerLlmIpc();
   registerTtsIpc();
+  registerSttIpc();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

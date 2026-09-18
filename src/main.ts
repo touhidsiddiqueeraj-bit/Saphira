@@ -10,7 +10,7 @@ const settings = migrateSettings(loadSettings());
 let avatar: SaphiraAvatar | null = null;
 let tts: SaphiraVoice;
 let gemini: GeminiClient;
-let wake: WakeListener;
+let wake: WakeListener | null = null;
 let history: {role:'user'|'model', text:string}[] = [];
 let isThinking=false;
 let wakeEnabled = localStorage.getItem('saphira_mic_enabled')==='yes';
@@ -381,12 +381,20 @@ function wire(){
   }
   gemini = new GeminiClient(()=> settings.apiKey, ()=> settings.persona, settings.rpmLimit);
 
+  if(window.saphiraDesktop){
+    // desktop: push-to-talk through the local Whisper engine — no wake word
+    wakeEnabled=false; localStorage.setItem('saphira_mic_enabled','no');
+    const micBtn=document.getElementById('micBtn') as HTMLElement;
+    micBtn.title='Tap to talk — offline';
+    wirePushToTalk(micBtn);
+    updateMic();
+  }
   // ponytail: on legacy iOS, wake word never fires — route to typing instead
-  if(isLegacyIOS && wakeEnabled){
+  if(!window.saphiraDesktop && isLegacyIOS && wakeEnabled){
     wakeEnabled=false; localStorage.setItem('saphira_mic_enabled','no');
     setTimeout(()=> flashLive('Type below — voice input needs iOS 14.5+'), 1200);
   }
-  wake = new WakeListener({
+  if(!window.saphiraDesktop) wake = new WakeListener({
     onWake:()=>{ flashLive(`“${settings.wakeWord}” ✓`); },
     onUtterance:(text)=>{
       if(isThinking) return;
@@ -407,7 +415,7 @@ function wire(){
       // service dead — stop retrying, say once
       wakeEnabled=false;
       localStorage.setItem('saphira_mic_enabled','no');
-      wake.setEnabled(false);
+      wake?.setEnabled(false);
       (document.getElementById('micEnabled') as HTMLSelectElement).value='no';
       updateMic();
       addBubble('bot',
@@ -417,8 +425,8 @@ function wire(){
         'Voice blocked here — typing works.');
     }
   });
-  wake.setWakeWord(settings.wakeWord);
-  wake.setEnabled(wakeEnabled);
+  wake?.setWakeWord(settings.wakeWord);
+  wake?.setEnabled(wakeEnabled);
   (document.getElementById('micEnabled') as HTMLSelectElement).value = wakeEnabled?'yes':'no';
   updateMic();
 
@@ -537,7 +545,8 @@ function wire(){
     if(e.key==='Enter') (document.getElementById('sendBtn') as HTMLButtonElement).click();
   });
   document.getElementById('micBtn')!.addEventListener('click', async()=>{
-    if(!wake.isSupported){
+    if(window.saphiraDesktop){ void pttToggle(); return; }
+    if(wake && !wake.isSupported){
       // no speech recognition here (old iOS) — the mic becomes a shortcut to
       // the text box, where the keyboard's dictation button still works
       (document.getElementById('chatInput') as HTMLInputElement).focus();
@@ -556,11 +565,11 @@ function wire(){
     lastInteract=Date.now();
     if(!wakeEnabled){
       wakeEnabled=true; localStorage.setItem('saphira_mic_enabled','yes');
-      wake.setEnabled(true);
+      wake?.setEnabled(true);
       updateMic();
       flashLive(`Say “${settings.wakeWord}”`);
     } else {
-      wake.listenOnce();
+      wake?.listenOnce();
       flashLive('Listening…');
     }
   });
@@ -725,24 +734,107 @@ function save(){
   avatar?.setPianoEvery(pianoEvery);
   avatar?.setPianoLength(pianoLength);
   gemini.setRpm(settings.rpmLimit);
-  wake.setWakeWord(wakeWord);
-  wakeEnabled=micOn;
-  localStorage.setItem('saphira_mic_enabled', micOn?'yes':'no');
-  wake.setEnabled(micOn);
+  wake?.setWakeWord(wakeWord);
+  wakeEnabled = window.saphiraDesktop ? false : micOn;
+  localStorage.setItem('saphira_mic_enabled', wakeEnabled?'yes':'no');
+  wake?.setEnabled(wakeEnabled);
   updateMic();
   openDrawer(false);
   flashLive('Saved');
 }
+
+// ---- desktop push-to-talk: record → local Whisper → chat ----
+let pttActive = false;
+let pttStop: (() => void) | null = null;
+function wirePushToTalk(btn: HTMLElement){
+  btn.addEventListener('click', ()=>{ void pttToggle(); });
+}
+async function pttToggle(){
+  if(pttActive){ pttStop?.(); return; }
+  if(!window.saphiraDesktop) return;
+  let stream: MediaStream;
+  try{ stream = await navigator.mediaDevices.getUserMedia({audio:true}); }
+  catch{ addBubble('bot','Mic blocked — allow it in browser settings.'); return; }
+  tts.unlock(); tts.stop();
+  lastInteract=Date.now();
+  pttActive=true;
+  const micBtn=document.getElementById('micBtn') as HTMLElement;
+  micBtn.classList.add('on');
+  flashLive('Listening… (tap to stop)', 30000);
+  const chunks: Blob[] = [];
+  let rec: MediaRecorder;
+  try{
+    rec = new MediaRecorder(stream);
+  }catch{ stream.getTracks().forEach(t=>t.stop()); pttActive=false; micBtn.classList.remove('on'); return; }
+  rec.ondataavailable=(e)=>{ if(e.data.size) chunks.push(e.data); };
+  let done = false;
+  const stop=()=>{
+    if(done) return; done=true;
+    window.clearInterval(poller);
+    window.clearTimeout(cap);
+    try{ if(rec.state!=='inactive') rec.stop(); }catch{}
+  };
+  pttStop=stop;
+  rec.onstop=async()=>{
+    stream.getTracks().forEach(t=>t.stop());
+    pttActive=false; pttStop=null;
+    micBtn.classList.remove('on');
+    try{
+      const ab=await new Blob(chunks).arrayBuffer();
+      const ac=new AudioContext();
+      const decoded=await ac.decodeAudioData(ab);
+      const oc=new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration*16000)), 16000);
+      const src=oc.createBufferSource(); src.buffer=decoded; src.connect(oc.destination); src.start();
+      const rendered=await oc.startRendering();
+      const pcm=rendered.getChannelData(0).slice(0);
+      void ac.close();
+      if(decoded.duration<0.4){ flashLive('Heard nothing'); return; }
+      flashLive('Transcribing…', 10000);
+      const r=await window.saphiraDesktop!.sttTranscribe(pcm);
+      const text=(r.text||'').trim();
+      if(!text){ flashLive('Heard nothing — try again'); return; }
+      addBubble('user', text);
+      lastInteract=Date.now();
+      void handleUser(text);
+    }catch(e){
+      flashLive('Voice input failed — typing still works');
+    }
+  };
+  rec.start();
+  // end after ~1.8s of silence once speech began, hard cap 15s
+  let speechSeen=false, quietMs=0, elapsedMs=0;
+  const ac=new AudioContext();
+  const analyser=ac.createAnalyser(); analyser.fftSize=512;
+  ac.createMediaStreamSource(stream).connect(analyser);
+  const buf=new Float32Array(analyser.fftSize);
+  const poller=window.setInterval(()=>{
+    elapsedMs+=200;
+    analyser.getFloatTimeDomainData(buf);
+    let sum=0; for(let i=0;i<buf.length;i++) sum+=buf[i]*buf[i];
+    const rms=Math.sqrt(sum/buf.length);
+    if(rms>0.015){ speechSeen=true; quietMs=0; }
+    else if(speechSeen){ quietMs+=200; if(quietMs>=1800) stop(); }
+    if(elapsedMs>=15000) stop();
+  }, 200);
+  const cap=window.setTimeout(stop, 16000);
+}
+
 function updateMic(){
   const b=document.getElementById('micBtn') as HTMLElement;
+  if(window.saphiraDesktop){
+    if(b){ b.style.opacity=''; b.title='Tap to talk — offline'; }
+    const input=document.getElementById('chatInput') as HTMLInputElement;
+    if(input) input.placeholder='Tap the mic and speak, or type';
+    return;
+  }
   if(b){
     b.classList.toggle('on', wakeEnabled);
     b.setAttribute('aria-pressed', wakeEnabled?'true':'false');
-    if(!wake.isSupported) b.style.opacity='0.45';
+    if(wake && !wake.isSupported) b.style.opacity='0.45';
     if(isLegacyIOS) b.title='Tap to talk (wake word not supported on this iPad)';
   }
   const input=document.getElementById('chatInput') as HTMLInputElement;
-  if(input) input.placeholder = !wake.isSupported ? 'Type a message' : isLegacyIOS ? 'Tap mic or type' : `Say “${settings.wakeWord}” or type`;
+  if(input) input.placeholder = (wake && !wake.isSupported) ? 'Type a message' : isLegacyIOS ? 'Tap mic or type' : `Say “${settings.wakeWord}” or type`;
 }
 // ponytail: idle chatter — 10 pre-baked lines, zero network except the TTS
 // voice she already uses. One utterance per chatterMinutes, Air-safe.
