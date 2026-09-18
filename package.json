@@ -1,0 +1,28 @@
+{
+  "name": "saphira-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Saphira — desktop companion with fully-local AI (brain, voice, ears)",
+  "type": "module",
+  "main": "build/desktop/main.js",
+  "scripts": {
+    "dev": "vite -c vite.desktop.config.ts",
+    "build": "vite build -c vite.desktop.config.ts",
+    "desktop:main": "tsc -p tsconfig.electron.json",
+    "desktop:dev": "node scripts/desktop-dev.mjs",
+    "desktop:build": "npm run build && npm run desktop:main",
+    "desktop:package": "npm run desktop:build && electron-builder --linux AppImage deb --win nsis"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@types/node": "^22.20.3",
+    "@types/three": "^0.160.0",
+    "electron": "^37.10.3",
+    "electron-builder": "^26.15.3",
+    "kokoro-js": "^1.2.1",
+    "node-llama-cpp": "^3.21.1",
+    "three": "^0.160.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}
