@@ -2,7 +2,7 @@
   "name": "saphira-desktop",
   "private": true,
   "version": "1.0.0",
-  "description": "Saphira \u2014 desktop companion with fully-local AI (brain, voice, ears)",
+  "description": "Saphira — desktop companion with fully-local AI (brain, voice, ears)",
   "type": "module",
   "main": "build/desktop/main.js",
   "scripts": {
@@ -11,18 +11,26 @@
     "desktop:main": "tsc -p tsconfig.electron.json",
     "desktop:dev": "node scripts/desktop-dev.mjs",
     "desktop:build": "npm run build && npm run desktop:main",
-    "desktop:package": "npm run desktop:build && electron-builder --linux AppImage deb --win nsis"
+    "desktop:package": "npm run desktop:build && node scripts/prune-platform.mjs linux && electron-builder --linux AppImage deb",
+    "desktop:package:win": "npm run desktop:build && node scripts/prune-platform.mjs win && electron-builder --win nsis"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@types/node": "^22.20.3",
-    "@types/three": "^0.160.0",
-    "electron": "^37.10.3",
-    "electron-builder": "^26.15.3",
     "kokoro-js": "^1.2.1",
     "node-llama-cpp": "^3.21.1",
-    "three": "^0.160.1",
+    "three": "^0.160.1"
+  },
+  "author": {
+    "name": "touhid",
+    "email": "touhidsiddiqueeraj@gmail.com"
+  },
+  "devDependencies": {
+    "electron": "^37.10.3",
+    "electron-builder": "^26.15.3",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0"
-  }
+    "vite": "^8.3.0",
+    "@types/node": "^22.20.3",
+    "@types/three": "^0.160.0"
+  },
+  "homepage": "https://github.com/touhidsiddiqueeraj-bit/Saphira-Air#readme"
 }

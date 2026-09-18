@@ -637,6 +637,7 @@ function setupLocalBrainUI(){
 
 function showBrainCard(models:{id:string;label:string;bytes:number;recommended?:boolean}[]){
   if(brainCardEl) return;
+  if(localStorage.getItem('saphira_braincard_done')==='yes') return;
   const card=el(`<div class="braincard"><div class="braincard-inner">
     <h2>Give Saphira a local brain?</h2>
     <p>Downloads once, then she thinks, speaks and listens fully offline — no API key ever. You can switch brains anytime in ⚙ settings.</p>
@@ -660,12 +661,13 @@ function showBrainCard(models:{id:string;label:string;bytes:number;recommended?:
   inner.appendChild(prog);
   const skip=document.createElement('button'); skip.className='braincard-skip';
   skip.textContent='Skip — I\'ll use a cloud brain (API key needed)';
-  skip.addEventListener('click', ()=>{ settings.brain='cloud'; saveSettings(settings); card.remove(); brainCardEl=null; });
+  skip.addEventListener('click', ()=>{ localStorage.setItem('saphira_braincard_done','yes'); settings.brain='cloud'; saveSettings(settings); card.remove(); brainCardEl=null; });
   inner.appendChild(skip);
   const off=window.saphiraDesktop!.onLlmEvent((e)=>{
     if(e.type==='progress' && bar) bar.style.width=`${Math.round((e.progress??0)*100)}%`;
     if(e.type==='state' && e.state==='ready'){
       off(); card.remove(); brainCardEl=null;
+      localStorage.setItem('saphira_braincard_done','yes');
       const modeSel=document.getElementById('brainMode') as HTMLSelectElement;
       if(modeSel){ modeSel.value='local'; modeSel.dispatchEvent(new Event('change')); }
       flashLive('Local brain ready — she now thinks on this PC');
@@ -954,7 +956,8 @@ async function handleUser(text:string){
     thinkEl.remove();
     const msg=String(e.message||e).slice(0,700);
     const is429 = msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
-    addBubble('bot', is429 ? 'Busy — try again in a bit.' : 'Error — check key / network.');
+    const isNoBrain = msg.includes('Local brain not ready');
+    addBubble('bot', is429 ? 'Busy — try again in a bit.' : isNoBrain ? 'Pick a local brain in ⚙ settings first (or switch to a cloud one).' : 'Error — check key / network.');
   } finally { isThinking=false; }
 }
 

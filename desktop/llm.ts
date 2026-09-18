@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getLlama, resolveModelFile, LlamaChatSession, LlamaLogLevel, type Llama, type LlamaModel, type LlamaContext, type ChatHistoryItem } from 'node-llama-cpp';
+import type { LlamaChatSession, Llama, LlamaModel, LlamaContext, ChatHistoryItem } from 'node-llama-cpp';
 import { llmDir } from './modelStore.js';
 import { setLocalChat, type BrainChatPayload } from './brain.js';
 
@@ -29,7 +29,15 @@ type ModelState = 'not-downloaded' | 'downloading' | 'loading' | 'ready' | 'erro
 const transient = new Map<string, { state: ModelState; progress?: number; error?: string }>();
 const activeFile = () => path.join(llmDir(), 'active.json');
 
+// node-llama-cpp is imported lazily — its native lib loads only when a local
+// brain is actually needed.
+type Nlc = typeof import('node-llama-cpp');
 let llama: Llama | null = null;
+let nlc: Nlc | null = null;
+async function lib(): Promise<Nlc> {
+  if (!nlc) nlc = await import('node-llama-cpp');
+  return nlc;
+}
 let model: LlamaModel | null = null;
 let context: LlamaContext | null = null;
 let session: LlamaChatSession | null = null;
@@ -67,12 +75,13 @@ async function ensureLoaded(): Promise<LlamaChatSession> {
   transient.set(want!, { state: 'loading' });
   emit({ type: 'state', modelId: want, state: 'loading' });
   try {
+    const { getLlama, LlamaChatSession: LCS, LlamaLogLevel } = await lib();
     if (!llama) llama = await getLlama({ logLevel: LlamaLogLevel.warn });
     model?.dispose?.();
     session = null;
     model = await llama.loadModel({ modelPath: file });
     context = await model.createContext({ contextSize: 4096 });
-    session = new LlamaChatSession({ contextSequence: context.getSequence() });
+    session = new LCS({ contextSequence: context.getSequence() });
     activeId = want;
     if (loadSeq === seq) {
       transient.set(want!, { state: 'ready' });
@@ -120,6 +129,7 @@ async function download(modelId: string): Promise<{ ok: boolean; error?: string 
   transient.set(modelId, { state: 'downloading', progress: 0 });
   emit({ type: 'state', modelId, state: 'downloading', progress: 0 });
   try {
+    const { resolveModelFile } = await lib();
     await resolveModelFile(c.url, {
       directory: llmDir(),
       onProgress: (s: { totalSize: number; downloadedSize: number }) => {

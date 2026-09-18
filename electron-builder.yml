@@ -1,0 +1,26 @@
+appId: app.saphira.desktop
+productName: Saphira
+directories:
+  output: release
+  buildResources: build-resources
+files:
+  - dist-desktop/**
+  - build/**
+asarUnpack:
+  - "node_modules/node-llama-cpp/**"
+  - "node_modules/@node-llama-cpp/**"
+  - "node_modules/onnxruntime-node/**"
+  - "node_modules/onnxruntime-common/**"
+  - "node_modules/@huggingface/transformers/**"
+  - "node_modules/sharp/**"
+  - "node_modules/@img/**"
+npmRebuild: false
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  synopsis: Saphira — anime companion with fully-local AI
+win:
+  target:
+    - nsis

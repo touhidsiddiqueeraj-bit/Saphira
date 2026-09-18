@@ -1,13 +1,10 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import { KokoroTTS } from 'kokoro-js';
-import { env } from '@huggingface/transformers';
 import { ttsCacheDir } from './modelStore.js';
 
 // Kokoro 82M q8 (~86 MB) runs on onnxruntime-node in this process, keeping the
 // render loop free. First use downloads model + voice files into
 // <userData>/models/tts (transformers cacheDir); after that she speaks offline.
-env.cacheDir = ttsCacheDir();
-env.allowLocalModels = false;
+// Imported lazily — cloud-only users never pay the transformers load cost.
 
 const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 // curated for her — female voices first, then the rest
@@ -19,8 +16,8 @@ export const VOICES = [
 
 type InitState = { state: 'not-downloaded' | 'downloading' | 'ready' | 'error'; progress?: number; error?: string };
 let initState: InitState = { state: 'not-downloaded' };
-let tts: KokoroTTS | null = null;
-let initPromise: Promise<KokoroTTS> | null = null;
+let tts: any = null;
+let initPromise: Promise<any> | null = null;
 // generation token so a new request supersedes an in-flight one
 let genSeq = 0;
 
@@ -30,10 +27,14 @@ function emit(e: unknown): void {
   }
 }
 
-async function ensureTTS(): Promise<KokoroTTS> {
+async function ensureTTS(): Promise<any> {
   if (tts) return tts;
   if (!initPromise) {
     initPromise = (async () => {
+      const { KokoroTTS } = await import('kokoro-js');
+      const { env } = await import('@huggingface/transformers');
+      env.cacheDir = ttsCacheDir();
+      env.allowLocalModels = false;
       initState = { state: 'downloading', progress: 0 };
       emit(initState);
       try {

@@ -1,0 +1,57 @@
+# Saphira Desktop
+
+The full Saphira companion as a **desktop app** (Electron) with **fully-local AI**: a small LLM brain, Kokoro neural voice, and Whisper ears — all runnable with the network unplugged. Cloud brains via any OpenAI-compatible API are one settings field away.
+
+This is a **fork** of the Saphira lite web app (`~/Documents/Saphira`), copied at the `air-dbg14` / 2026-09-18 state. The lite repo is untouched and deploys independently to the iPad; the two versions diverge from here on purpose.
+
+## What's inside
+
+| Part | Engine | First use | Offline |
+|---|---|---|---|
+| Brain (cloud) | any OpenAI-compatible `/chat/completions` (OpenAI, Gemini, Groq, OpenRouter, Ollama, LM Studio, custom URL) | API key | — |
+| Brain (local) | node-llama-cpp + Qwen2.5 1.5B/3B GGUF | ~1–2 GB download | ✅ |
+| Voice | Kokoro 82M q8 (onnxruntime-node) | ~90 MB download | ✅ |
+| Ears | Whisper tiny.en q8 (transformers.js) | ~40 MB download | ✅ |
+
+Everything else is the Saphira you know: the 3D avatar, piano, tasks, timers/alarms, chatter, themes, zoom. Models download once (with progress pills/cards) into the app's data dir (`~/.config/Saphira/models/` when installed); after that, brain + voice + ears need zero network.
+
+## Run it (dev)
+
+```bash
+npm install        # electron + llama.cpp/ONNX prebuilt binaries
+npm run desktop:dev    # vite dev server + electron window
+```
+
+## Package it
+
+```bash
+npm run desktop:package    # → release/Saphira-*.AppImage, *.deb, *.exe (NSIS)
+```
+
+Notes:
+- **Windows**: llama.cpp ships its Linux prebuilt in the package; on Windows the matching binary is fetched automatically on first brain use (one-time, needs internet).
+- The installer ships without models by design — first-run cards walk through picking a brain, and the voice/ears download on first use with visible progress.
+
+## Architecture
+
+```
+desktop/main.ts        Electron main: window, app:// protocol, IPC registry
+desktop/protocol       app://saphira/* → dist-desktop/* (all asset paths unchanged)
+desktop/brain.ts       OpenAI-compatible cloud chat (net.fetch, no CORS) + local routing
+desktop/llm.ts         GGUF catalog, download w/ progress, lazy chat session
+desktop/tts.ts         Kokoro synthesis → Int16 PCM chunks over IPC
+desktop/stt.ts         Whisper pipeline for 16 kHz mono Float32
+desktop/preload.cts    contextBridge → window.saphiraDesktop (the only renderer API)
+src/                   the forked Saphira renderer; feature-detects window.saphiraDesktop
+```
+
+Renderer keeps working as a plain web page when `window.saphiraDesktop` is absent — which is exactly what keeps the mobile door open:
+
+## Android later
+
+Electron can't run on Android. The path there is a **Capacitor** wrap of this same renderer into an APK; the AI engines then swap to their on-device builds:
+
+- Kokoro + Whisper: already have WASM/WebGPU runtimes via transformers.js (renderer-side).
+- Local LLM: needs llama.cpp JNI bindings on Android — its own project phase. Until then the APK can use cloud brains (OpenAI-compatible) or Ollama on a home server.
+
+Smoke checks (headless, used to verify builds): `SAPHIRA_SMOKE=1 npx electron build/desktop/main.js` writes facts + a screenshot; flags `SAPHIRA_MOCK_BRAIN`, `SAPHIRA_SMOKE_LOCAL`, `SAPHIRA_SMOKE_TTS`, `SAPHIRA_SMOKE_STT` exercise the cloud/local brain, voice, and ears end-to-end.

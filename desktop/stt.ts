@@ -1,12 +1,10 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import { pipeline, env } from '@huggingface/transformers';
 import { sttCacheDir } from './modelStore.js';
 
 // Whisper tiny.en q8 (~40 MB) — one-time download into <userData>/models/stt,
 // then she listens fully offline. Input is 16 kHz mono Float32 from the
 // renderer (MediaRecorder → decodeAudioData → OfflineAudioContext resample).
-env.cacheDir = sttCacheDir();
-env.allowLocalModels = false;
+// Imported lazily — cloud-only users never pay the transformers load cost.
 
 const MODEL_ID = 'Xenova/whisper-tiny.en';
 
@@ -25,10 +23,13 @@ async function ensure(): Promise<void> {
   if (transcriber) return;
   if (!initPromise) {
     initPromise = (async () => {
+      const { pipeline, env } = await import('@huggingface/transformers');
+      env.cacheDir = sttCacheDir();
+      env.allowLocalModels = false;
       initState = { state: 'downloading', progress: 0 };
       emit(initState);
       try {
-        transcriber = await pipeline('automatic-speech-recognition', MODEL_ID, {
+        transcriber = await (pipeline as any)('automatic-speech-recognition', MODEL_ID, {
           dtype: 'q8',
           progress_callback: (p: any) => {
             if (p?.status === 'progress' && p.total) {

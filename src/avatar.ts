@@ -7,7 +7,7 @@ export type Expression = 'neutral'|'happy'|'excited'|'sad'|'surprised'|'thinking
 export type Gesture = 'none'|'wave'|'nod'|'shrug'|'piano';
 export type Theme = 'auto'|'day'|'night';
 // bump on every push — shown in ?debug=1 overlay so screenshots prove the build
-export const BUILD = 'air-dbg14';
+export const BUILD = 'desktop-1';
 
 // Renderer runs NoToneMapping + a soft light rig so on-screen colors match the
 // stylized flat materials she was authored with in Blender (clothes are unlit,
