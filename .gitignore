@@ -4,3 +4,4 @@ build/
 release/
 *.log
 .DS_Store
+squashfs-root/
