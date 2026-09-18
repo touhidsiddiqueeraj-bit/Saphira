@@ -161,3 +161,24 @@ html[data-theme="night"] .cp-alarm{background:rgba(255,255,255,0.07)}
 .cp-alarm.ringing{background:rgba(224,90,71,0.18)}
 .cp-alarm-time{font-family:"Fragment Mono",monospace;font-weight:700}
 .cp-btn.sm{flex:none;width:auto;padding:5px 9px;font-size:13px}
+
+/* desktop: local brain — first-run card + model rows */
+.braincard{position:fixed;inset:0;z-index:28;display:grid;place-items:center;background:rgba(0,0,0,0.45)}
+.braincard-inner{width:min(440px,92vw);border-radius:18px;background:rgba(255,255,255,0.97);border:1px solid rgba(0,0,0,0.08);box-shadow:0 18px 60px rgba(0,0,0,0.25);padding:22px;display:flex;flex-direction:column;gap:12px;color:#1a1a1e}
+html[data-theme="night"] .braincard-inner{background:rgba(30,32,40,0.98);border-color:rgba(255,255,255,0.12);color:#ece9e3}
+.braincard h2{font-family:"Fraunces",serif;margin:0;font-size:19px;letter-spacing:-0.02em}
+.braincard p{margin:0;font-size:13px;line-height:1.5;opacity:.75}
+.braincard-btn{padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--neutral2);cursor:pointer;font-weight:600;text-align:left;font-size:14px;color:inherit}
+.braincard-btn.primary{background:#111;color:white;border-color:#111}
+html[data-theme="night"] .braincard-btn.primary{background:#ece9e3;color:#111;border-color:#ece9e3}
+.braincard-btn:disabled{opacity:.5;cursor:default}
+.braincard-skip{background:transparent;border:0;opacity:.6;font-size:13px;cursor:pointer;text-decoration:underline;color:inherit;padding:4px}
+.brain-row{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:rgba(0,0,0,0.04);font-size:13px}
+html[data-theme="night"] .brain-row{background:rgba(255,255,255,0.06)}
+.brain-row .r1{display:flex;align-items:center;gap:8px;font-weight:600}
+.brain-row .st{margin-left:auto;font-weight:400;opacity:.6;font-size:12px}
+.brain-row .r2{display:flex;gap:8px;align-items:center}
+.brain-prog{flex:1;height:6px;border-radius:999px;background:rgba(0,0,0,0.12);overflow:hidden}
+.brain-prog > div{height:100%;background:#0e8a5a;width:0%;transition:width .3s}
+.brain-mini{border:1px solid var(--line);background:transparent;color:inherit;border-radius:999px;padding:4px 12px;font-size:12px;cursor:pointer;font-weight:600}
+.brain-mini.on{background:#0e8a5a;color:#fff;border-color:#0e8a5a}

@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { registerModelIpc } from './modelStore.js';
 import { registerBrainIpc } from './brain.js';
+import { registerLlmIpc } from './llm.js';
 
 // app:// is a standard, secure, fetch-capable scheme so the renderer's
 // root-absolute paths (/model/ai_ohto.glb, /bg.jpg, /audio/…) resolve inside
@@ -92,41 +93,66 @@ function maybeRunSmoke(win: BrowserWindow): void {
   if (process.env.SAPHIRA_SMOKE !== '1') return;
   const out = process.env.SAPHIRA_SMOKE_OUT || path.join(app.getPath('userData'), 'smoke.json');
   const errors: string[] = [];
+  const write = async (payload: unknown) => {
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, JSON.stringify(payload, null, 2));
+    try {
+      const img = await win.webContents.capturePage();
+      fs.writeFileSync(out.replace(/\.json$/, '.png'), img.toPNG());
+    } catch { /* screenshot best-effort */ }
+    app.quit();
+  };
   win.webContents.on('console-message', (_e, _level, message) => errors.push(String(message).slice(0, 300)));
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => {
-      const mockBrain = process.env.SAPHIRA_MOCK_BRAIN === '1'
-        ? startMockBrain().then((port) => win.webContents.executeJavaScript(`
+      void (async () => {
+        const extra: any = {};
+        // cloud-brain chain via the localhost mock endpoint
+        if (process.env.SAPHIRA_MOCK_BRAIN === '1') {
+          const port = await startMockBrain();
+          const t = await win.webContents.executeJavaScript(`
             (async () => {
               const r = await window.saphiraDesktop.brainChat({
                 mode: 'cloud', baseUrl: 'http://127.0.0.1:${port}', apiKey: 'smoke', model: 'mock',
                 system: 'test', history: [], user: 'hi',
               });
               return r.text;
-            })()`).then((t) => ({ mockBrainReply: t, mockBrainOk: t.includes('Mock brain here.') }))
-          ) : Promise.resolve({});
-      void mockBrain.then((extra) => win.webContents.executeJavaScript(`({
-        title: document.title,
-        hasCanvas: !!document.getElementById('c'),
-        hasInput: !!document.getElementById('chatInput'),
-        hasMic: !!document.getElementById('micBtn'),
-        hasGear: !!document.getElementById('gear'),
-        brainSectionVisible: (() => { const b = document.getElementById('brainSection'); return !!b && b.style.display !== 'none'; })(),
-        brainPresetCount: (document.getElementById('brainPreset')?.options || []).length,
-        bubble: document.querySelector('.bubble')?.textContent?.slice(0, 80) || null,
-        avatar: typeof window.__saphiraAvatar === 'object' && window.__saphiraAvatar !== null,
-        debug: window.__saphiraAvatar?.debugInfo?.() || null,
-      })`).then(async (facts) => {
-        fs.mkdirSync(path.dirname(out), { recursive: true });
-        fs.writeFileSync(out, JSON.stringify({ ok: true, facts: { ...facts, ...extra }, errors }, null, 2));
-        try {
-          const img = await win.webContents.capturePage();
-          fs.writeFileSync(out.replace(/\.json$/, '.png'), img.toPNG());
-        } catch { /* screenshot best-effort */ }
-      }).catch((e) => {
-        fs.mkdirSync(path.dirname(out), { recursive: true });
-        fs.writeFileSync(out, JSON.stringify({ ok: false, error: String(e), errors }, null, 2));
-      }).finally(() => app.quit()));
+            })()`);
+          extra.mockBrainReply = t;
+          extra.mockBrainOk = t.includes('Mock brain here.');
+        }
+        // full local-brain chain: download GGUF → load → chat (slow, opt-in)
+        if (process.env.SAPHIRA_SMOKE_LOCAL === '1') {
+          const t0 = Date.now();
+          extra.local = await win.webContents.executeJavaScript(`
+            (async () => {
+              const dl = await window.saphiraDesktop.llmDownload('qwen2.5-1.5b');
+              const st = await window.saphiraDesktop.llmStatus();
+              const chat = await window.saphiraDesktop.brainChat({
+                mode: 'local',
+                system: 'You are Saphira, a friendly anime companion. Always respond as JSON: {"text":"your reply","expression":"happy","intensity":0.7,"gesture":"none"}. Reply with ONLY the JSON object.',
+                history: [], user: 'Say hi and tell me your name in one short sentence.',
+              });
+              return { dl, activeId: st.activeId, chat: chat.text };
+            })()`).catch((e) => ({ error: String(e) }));
+          extra.localSeconds = Math.round((Date.now() - t0) / 1000);
+        }
+        const facts = await win.webContents.executeJavaScript(`({
+          title: document.title,
+          hasCanvas: !!document.getElementById('c'),
+          hasInput: !!document.getElementById('chatInput'),
+          hasMic: !!document.getElementById('micBtn'),
+          hasGear: !!document.getElementById('gear'),
+          brainSectionVisible: (() => { const b = document.getElementById('brainSection'); return !!b && b.style.display !== 'none'; })(),
+          brainPresetCount: (document.getElementById('brainPreset')?.options || []).length,
+          bubble: document.querySelector('.bubble')?.textContent?.slice(0, 80) || null,
+          avatar: typeof window.__saphiraAvatar === 'object' && window.__saphiraAvatar !== null,
+          debug: window.__saphiraAvatar?.debugInfo?.() || null,
+        })`);
+        await write({ ok: true, facts: { ...facts, ...extra }, errors });
+      })().catch(async (e) => {
+        await write({ ok: false, error: String(e), errors });
+      });
     }, 9000);
   });
 }
@@ -172,6 +198,7 @@ void app.whenReady().then(async () => {
   registerMiscIpc();
   registerModelIpc();
   registerBrainIpc();
+  registerLlmIpc();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

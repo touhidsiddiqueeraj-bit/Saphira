@@ -469,6 +469,8 @@ function wire(){
     syncMode();
   }
 
+  if(window.saphiraDesktop) setupLocalBrainUI();
+
   const presetRow=document.getElementById('presetRow')!;
   presetRow.innerHTML='';
   Object.keys(PRESETS).forEach(k=>{
@@ -533,6 +535,116 @@ function wire(){
     }
   });
   document.addEventListener('keydown', e=>{ if(e.key==='Escape') openDrawer(false); });
+}
+
+
+// ---- desktop: local brain (download / select / progress) ----
+let brainCardEl: HTMLElement | null = null;
+function fmtGB(bytes?:number){ return bytes ? (bytes/1e9).toFixed(1).replace(/\.0$/,'')+' GB' : ''; }
+
+function setupLocalBrainUI(){
+  const box=document.getElementById('localBrainFields') as HTMLElement;
+  if(!box || !window.saphiraDesktop) return;
+  const render=async()=>{
+    const st=await window.saphiraDesktop!.llmStatus();
+    box.innerHTML='';
+    st.models.forEach(m=>{
+      const row=document.createElement('div'); row.className='brain-row';
+      const r1=document.createElement('div'); r1.className='r1';
+      const name=document.createElement('span'); name.textContent=m.label;
+      const stSpan=document.createElement('span'); stSpan.className='st';
+      stSpan.textContent = m.state==='downloading' ? `⬇ ${Math.round((m.progress??0)*100)}%`
+        : m.state==='loading' ? 'loading…'
+        : m.state==='error' ? 'error — retry'
+        : st.activeId===m.id ? '✓ her brain'
+        : m.state==='ready' ? 'downloaded' : fmtGB(m.bytes);
+      r1.append(name, stSpan);
+      row.appendChild(r1);
+      const r2=document.createElement('div'); r2.className='r2';
+      if(m.state==='downloading'){
+        const prog=document.createElement('div'); prog.className='brain-prog';
+        const bar=document.createElement('div'); bar.style.width=`${Math.round((m.progress??0)*100)}%`;
+        prog.appendChild(bar); r2.appendChild(prog);
+      } else if(m.state==='not-downloaded' || m.state==='error'){
+        const dl=document.createElement('button'); dl.className='brain-mini'; dl.textContent='Download';
+        dl.addEventListener('click', ()=>{ dl.disabled=true; void window.saphiraDesktop!.llmDownload(m.id); render(); });
+        r2.appendChild(dl);
+      } else if(m.state==='ready' && st.activeId!==m.id){
+        const use=document.createElement('button'); use.className='brain-mini'; use.textContent='Make her brain';
+        use.addEventListener('click', async()=>{
+          settings.brain='local'; settings.llmModelId=m.id; saveSettings(settings);
+          await window.saphiraDesktop!.llmSelect(m.id);
+          const modeSel=document.getElementById('brainMode') as HTMLSelectElement;
+          if(modeSel) modeSel.value='local';
+          modeSel?.dispatchEvent(new Event('change'));
+          render();
+        });
+        r2.appendChild(use);
+      }
+      row.appendChild(r2);
+      box.appendChild(row);
+    });
+    const hint=document.createElement('div');
+    hint.style.cssText='font-size:12px;opacity:.6;line-height:1.5';
+    hint.textContent = st.models.some(m=>m.state==='ready')
+      ? 'Runs fully offline once downloaded. First load takes a few seconds.'
+      : 'Pick one to download (~1–2 GB, one time). She then runs fully offline.';
+    box.appendChild(hint);
+  };
+  void render();
+  window.saphiraDesktop.onLlmEvent(()=> render());
+  void maybeBrainCard();
+}
+
+function showBrainCard(models:{id:string;label:string;bytes:number;recommended?:boolean}[]){
+  if(brainCardEl) return;
+  const card=el(`<div class="braincard"><div class="braincard-inner">
+    <h2>Give Saphira a local brain?</h2>
+    <p>Downloads once, then she thinks, speaks and listens fully offline — no API key ever. You can switch brains anytime in ⚙ settings.</p>
+  </div></div>`);
+  const inner=card.firstElementChild as HTMLElement;
+  const prog=document.createElement('div'); prog.className='brain-prog'; prog.style.display='none';
+  const bar=document.createElement('div'); prog.appendChild(bar);
+  const buttons: HTMLButtonElement[] = [];
+  [...models].sort((a,b)=>(a.recommended?-1:1)-(b.recommended?-1:1)).forEach(m=>{
+    const b=document.createElement('button');
+    b.className='braincard-btn'+(m.recommended?' primary':'');
+    b.textContent=`Download ${m.label}`;
+    b.addEventListener('click', ()=>{
+      buttons.forEach(x=>x.disabled=true);
+      prog.style.display='flex';
+      settings.brain='local'; settings.llmModelId=m.id; saveSettings(settings);
+      void window.saphiraDesktop!.llmDownload(m.id);
+    });
+    buttons.push(b); inner.appendChild(b);
+  });
+  inner.appendChild(prog);
+  const skip=document.createElement('button'); skip.className='braincard-skip';
+  skip.textContent='Skip — I\'ll use a cloud brain (API key needed)';
+  skip.addEventListener('click', ()=>{ settings.brain='cloud'; saveSettings(settings); card.remove(); brainCardEl=null; });
+  inner.appendChild(skip);
+  const off=window.saphiraDesktop!.onLlmEvent((e)=>{
+    if(e.type==='progress' && bar) bar.style.width=`${Math.round((e.progress??0)*100)}%`;
+    if(e.type==='state' && e.state==='ready'){
+      off(); card.remove(); brainCardEl=null;
+      const modeSel=document.getElementById('brainMode') as HTMLSelectElement;
+      if(modeSel){ modeSel.value='local'; modeSel.dispatchEvent(new Event('change')); }
+      flashLive('Local brain ready — she now thinks on this PC');
+    }
+    if(e.type==='state' && e.state==='error'){
+      off(); card.remove(); brainCardEl=null;
+      flashLive('Download failed — try again in settings');
+    }
+  });
+  document.querySelector('.stage')!.appendChild(card);
+  brainCardEl=card;
+}
+
+async function maybeBrainCard(){
+  if(!window.saphiraDesktop) return;
+  const st=await window.saphiraDesktop.llmStatus();
+  const anyDownloaded=st.models.some(m=>m.state==='ready'||m.state==='loading'||m.state==='downloading');
+  if(!anyDownloaded) showBrainCard(st.models);
 }
 
 function openDrawer(open:boolean){
