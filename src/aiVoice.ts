@@ -20,6 +20,10 @@ export const AI_VOICES: { name: string; desc: string }[] = [
 export class SaphiraVoice {
   voice = 'Sulafat';
   rate = 1.0;
+  kokoroEnabled = false;
+  kokoroVoice = 'af_heart';
+  private kokoroCancel = 0;
+  private kokoroSources: AudioBufferSourceNode[] = [];
   private ctx: AudioContext | null = null;
   private src: AudioBufferSourceNode | null = null;
   private seq = 0;
@@ -48,6 +52,8 @@ export class SaphiraVoice {
 
   setAiVoice(name:string){ this.voice=name; }
   setRate(r:number){ this.rate=r; }
+  setKokoroEnabled(on:boolean){ this.kokoroEnabled=on; }
+  setKokoroVoice(v:string){ this.kokoroVoice=v||'af_heart'; }
   // settings sound toggle — cuts in-flight speech and silences future speaks
   setMuted(m:boolean){ this.muted=m; if(m) this.stop(); }
 
@@ -71,6 +77,9 @@ export class SaphiraVoice {
 
   stop(){
     this.seq++;
+    this.kokoroCancel++;
+    for(const s of this.kokoroSources){ try{ s.onended=null; s.stop(); }catch{} try{ s.disconnect(); }catch{} }
+    this.kokoroSources=[];
     const s=this.src; this.src=null;
     if(s){ try{ s.onended=null; s.stop(); }catch{} try{ s.disconnect(); }catch{} }
     try{ window.speechSynthesis?.cancel(); }catch{}
@@ -83,6 +92,11 @@ export class SaphiraVoice {
     if(!clean) return true;
     if(this.muted){ this.onStatus('idle'); return true; } // sound off — reply stays text-only
     this.failure=null;
+    if(this.kokoroEnabled && window.saphiraDesktop){
+      const ctx=this.ensureCtx();
+      if(!ctx){ this.failure='other'; return false; }
+      return await this.speakKokoro(clean, my, ctx);
+    }
     const key=this.getKey().trim();
     if(!key){ this.failure='key'; return false; }
     const ctx=this.ensureCtx();
@@ -146,6 +160,56 @@ export class SaphiraVoice {
     const ok=await this.speakLocal(clean, my);
     return ok;
   }
+  // desktop: local Kokoro streamed as Int16 PCM chunks from the main process
+  private speakKokoro(text: string, my: number, ctx: AudioContext): Promise<boolean>{
+    return new Promise((resolve)=>{
+      const cancel = ++this.kokoroCancel;
+      const reqId = my;
+      const voice = this.kokoroVoice;
+      const rate = this.rate;
+      let scheduledUntil = 0;
+      let chunkSeen = false;
+      let finished = false;
+      const finish=(ok:boolean)=>{
+        if(finished) return; finished=true;
+        off();
+        if(my===this.seq){ this.src=null; this.onStatus('idle'); }
+        resolve(ok);
+      };
+      const off = window.saphiraDesktop!.onTtsChunk(({reqId:rid, pcm, rate:srate, last})=>{
+        if(rid!==reqId || cancel!==this.kokoroCancel || finished) return;
+        chunkSeen=true;
+        try{
+          const buf=ctx.createBuffer(1, pcm.length, srate);
+          const ch=buf.getChannelData(0);
+          for(let i=0;i<pcm.length;i++) ch[i]=pcm[i]/32768;
+          const src=ctx.createBufferSource();
+          src.buffer=buf;
+          const pr=Math.max(0.7,Math.min(1.3,rate));
+          src.playbackRate.value=pr;
+          const at=Math.max(ctx.currentTime+0.03, scheduledUntil);
+          src.connect(ctx.destination);
+          src.onended=()=>{
+            const i=this.kokoroSources.indexOf(src); if(i>=0) this.kokoroSources.splice(i,1);
+            if(last && this.kokoroSources.filter(s=>s===src).length===0 && scheduledUntil<=at+0.1) finish(true);
+          };
+          src.start(at);
+          this.kokoroSources.push(src);
+          scheduledUntil=at+buf.duration/pr+0.02;
+          if(last) window.setTimeout(()=>{ if(!finished && this.kokoroSources.length===0) finish(true); }, Math.ceil(buf.duration/pr*1000)+400);
+        }catch{}
+      });
+      // no audio ever came back (e.g. voice files missing) — treat as spoken
+      // so the conversation still works, she just lip-syncs silently
+      window.setTimeout(()=>{ if(!finished && !chunkSeen) finish(true); }, 4000);
+      window.setTimeout(()=>{ if(!finished) finish(true); }, 30000+text.length*400);
+      this.onStatus('speaking');
+      void window.saphiraDesktop!.ttsSynthesize(reqId, text, {voice, rate}).then((res)=>{
+        if(res && res.ok===false && !finished){ this.failure='other'; finish(false); }
+      }).catch(()=>{ if(!finished && !chunkSeen){ this.failure='other'; finish(false); } });
+    });
+  }
+
   private chunk(text: string): string[]{
     if(text.length<=120) return [text];
     // split on sentence boundaries, keep delimiters, pack into ~100-char chunks

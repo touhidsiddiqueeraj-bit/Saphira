@@ -224,6 +224,8 @@ function renderApp(){
         <label class="field"><span>Wake word</span><input id="wakeWord" placeholder="hey saphira"/></label>
         <div class="field"><span>Personality</span><div class="row" id="presetRow"></div><textarea id="persona" spellcheck="false"></textarea></div>
         <label class="field"><span>AI voice</span><select id="aiVoice"></select></label>
+        <div class="field" id="voiceEngineField" style="display:none"><span>Voice engine</span><select id="ttsEngineSel"><option value="kokoro">Kokoro — local, offline</option><option value="browser">Browser / OS voices</option></select></div>
+        <label class="field" id="kokoroVoiceField" style="display:none"><span>Kokoro voice</span><select id="kokoroVoiceSel"></select></label>
         <div class="field"><span>Rate</span><div class="row"><input id="rate" type="range" min="0.7" max="1.3" step="0.05" style="flex:1"/></div></div>
         <div class="field"><span>Zoom <small style="opacity:.6;font-weight:400">— closer or farther camera</small></span><div class="row"><input id="zoom" type="range" min="0.7" max="1.6" step="0.05" style="flex:1"/></div></div>
         <label class="field"><span>Mic</span><select id="micEnabled"><option value="no">Off</option><option value="yes">On</option></select></label>
@@ -367,6 +369,16 @@ function wire(){
   }, ()=> ttsKey(settings));
   tts.setRate(settings.rate);
   tts.setAiVoice(settings.aiVoice);
+  if(window.saphiraDesktop){
+    tts.setKokoroEnabled(settings.ttsEngine==='kokoro');
+    tts.setKokoroVoice(settings.kokoroVoice);
+    // one-time voice download progress surfaces as a pill
+    window.saphiraDesktop.onTtsEvent((e)=>{
+      if(e.state==='downloading') flashLive(`Downloading her voice — ${Math.round((e.progress??0)*100)}%`, 1500);
+      else if(e.state==='ready') flashLive('Her voice is ready — fully offline');
+      else if(e.state==='error') flashLive('Voice download failed — browser voice will be used');
+    });
+  }
   gemini = new GeminiClient(()=> settings.apiKey, ()=> settings.persona, settings.rpmLimit);
 
   // ponytail: on legacy iOS, wake word never fires — route to typing instead
@@ -469,7 +481,25 @@ function wire(){
     syncMode();
   }
 
-  if(window.saphiraDesktop) setupLocalBrainUI();
+  if(window.saphiraDesktop){
+    setupLocalBrainUI();
+    const vf=document.getElementById('voiceEngineField') as HTMLElement;
+    const kf=document.getElementById('kokoroVoiceField') as HTMLElement;
+    const esel=document.getElementById('ttsEngineSel') as HTMLSelectElement;
+    const vsel=document.getElementById('kokoroVoiceSel') as HTMLSelectElement;
+    if(vf && esel && vsel){
+      vf.style.display='flex';
+      esel.value = settings.ttsEngine==='browser' ? 'browser' : 'kokoro';
+      void window.saphiraDesktop.ttsVoices().then(list=>{
+        vsel.innerHTML='';
+        list.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; if(v===settings.kokoroVoice) o.selected=true; vsel.appendChild(o); });
+      });
+      const syncVoice=()=>{ kf!.style.display = esel.value==='kokoro' ? 'flex' : 'none'; };
+      esel.addEventListener('change', syncVoice);
+      syncVoice();
+      kf.style.display='flex';
+    }
+  }
 
   const presetRow=document.getElementById('presetRow')!;
   presetRow.innerHTML='';
@@ -674,6 +704,14 @@ function save(){
     settings.brainPreset = presetSel?.value || settings.brainPreset;
     settings.brainBaseUrl = ((document.getElementById('brainBaseUrl') as HTMLInputElement)?.value || settings.brainBaseUrl).trim();
     settings.brainModel = ((document.getElementById('brainModel') as HTMLInputElement)?.value || '').trim();
+  }
+  if(window.saphiraDesktop){
+    const esel=document.getElementById('ttsEngineSel') as HTMLSelectElement;
+    const vsel=document.getElementById('kokoroVoiceSel') as HTMLSelectElement;
+    settings.ttsEngine = esel?.value==='browser' ? 'browser' : 'kokoro';
+    if(vsel?.value) settings.kokoroVoice=vsel.value;
+    tts.setKokoroEnabled(settings.ttsEngine==='kokoro');
+    tts.setKokoroVoice(settings.kokoroVoice);
   }
   settings.apiKey=apiKey; settings.ttsApiKey=ttsApiKey; settings.wakeWord=wakeWord; settings.persona=persona; settings.aiVoice=aiVoice; settings.rate=rate; settings.zoom=zoom; settings.chatter=chatter; settings.chatterMinutes=chatterMinutes; settings.voice=voiceOn; settings.piano=pianoOn; settings.pianoEveryMinutes=pianoEvery; settings.pianoLengthSeconds=pianoLength;
   saveSettings(settings);

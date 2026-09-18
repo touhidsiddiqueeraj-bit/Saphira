@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { registerModelIpc } from './modelStore.js';
 import { registerBrainIpc } from './brain.js';
 import { registerLlmIpc } from './llm.js';
+import { registerTtsIpc } from './tts.js';
 
 // app:// is a standard, secure, fetch-capable scheme so the renderer's
 // root-absolute paths (/model/ai_ohto.glb, /bg.jpg, /audio/…) resolve inside
@@ -137,6 +138,23 @@ function maybeRunSmoke(win: BrowserWindow): void {
             })()`).catch((e) => ({ error: String(e) }));
           extra.localSeconds = Math.round((Date.now() - t0) / 1000);
         }
+        // kokoro voice: download model + synthesize a line, verify PCM streams back
+        if (process.env.SAPHIRA_SMOKE_TTS === '1') {
+          extra.tts = await win.webContents.executeJavaScript(`
+            (async () => {
+              return await new Promise((resolve) => {
+                let chunks = 0, samples = 0, rate = 0, lastSeen = false;
+                const off = window.saphiraDesktop.onTtsChunk(({pcm, rate: r, last}) => {
+                  chunks++; samples += pcm.length; rate = r;
+                  if (last && !lastSeen) { lastSeen = true; off(); resolve({ chunks, samples, rate, lastSeen }); }
+                });
+                window.saphiraDesktop.ttsSynthesize(777, 'Hello! I can speak now, all by myself.', { voice: 'af_heart', rate: 1 })
+                  .then((r) => { if (r.ok === false) resolve({ error: r.error }); })
+                  .catch((e) => resolve({ error: String(e) }));
+                setTimeout(() => resolve({ chunks, samples, rate, timeout: !lastSeen }), 240000);
+              });
+            })()`).catch((e) => ({ error: String(e) }));
+        }
         const facts = await win.webContents.executeJavaScript(`({
           title: document.title,
           hasCanvas: !!document.getElementById('c'),
@@ -199,6 +217,7 @@ void app.whenReady().then(async () => {
   registerModelIpc();
   registerBrainIpc();
   registerLlmIpc();
+  registerTtsIpc();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

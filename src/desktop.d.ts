@@ -40,6 +40,8 @@ export type SaphiraDesktopApi = {
   // ---- kokoro tts ----
   ttsSynthesize(reqId: number, text: string, opts: TtsOpts): Promise<{ ok: boolean; error?: string }>;
   onTtsChunk(cb: (c: { reqId: number; pcm: Int16Array; rate: number; last: boolean }) => void): () => void;
+  ttsVoices(): Promise<string[]>;
+  onTtsEvent(cb: (e: { state: string; progress?: number; error?: string }) => void): () => void;
   ttsReady(): Promise<{ ready: boolean; progress?: number; error?: string }>;
   // ---- whisper stt ----
   sttEnsure(): Promise<{ ok: boolean; progress?: number; error?: string }>;

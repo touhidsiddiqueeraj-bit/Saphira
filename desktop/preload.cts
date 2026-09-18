@@ -22,8 +22,10 @@ contextBridge.exposeInMainWorld('saphiraDesktop', {
 
   // ---- kokoro tts ----
   ttsReady: () => ipcRenderer.invoke('tts:ready'),
+  ttsVoices: () => ipcRenderer.invoke('tts:voices'),
   ttsSynthesize: (reqId: number, text: string, opts: unknown) => ipcRenderer.invoke('tts:synthesize', reqId, text, opts),
   onTtsChunk: on('tts:chunk'),
+  onTtsEvent: on('tts:event'),
 
   // ---- whisper stt ----
   sttEnsure: () => ipcRenderer.invoke('stt:ensure'),
