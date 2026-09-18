@@ -1,59 +1,107 @@
 # Saphira Desktop
 
-The full Saphira companion as a **desktop app** (Electron) with **fully-local AI**: a small LLM brain, Kokoro neural voice, and Whisper ears — all runnable with the network unplugged. Cloud brains via any OpenAI-compatible API are one settings field away.
+<p align="center">
+  <img src="docs/icon.png" width="120" alt="Saphira"/>
+</p>
 
-This is a **fork** of the Saphira lite web app (`~/Documents/Saphira`), copied at the `air-dbg14` / 2026-09-18 state. The lite repo is untouched and deploys independently to the iPad; the two versions diverge from here on purpose.
+**Saphira is an anime companion who lives on your desktop** — a fully animated 3D character who chats with you, speaks aloud, listens, sees through your camera, plays the piano, and manages your tasks and alarms. She runs on a local AI stack, so once her models are in place she works **entirely offline** — no API key required.
 
-## What's inside
+<p align="center">
+  <img src="docs/screenshot-main.png" width="49%" alt="Saphira on her stage"/>
+  <img src="docs/screenshot-chat.png" width="49%" alt="Chatting with Saphira"/>
+</p>
+<p align="center">
+  <img src="docs/screenshot-settings.png" width="49%" alt="Settings"/>
+  <img src="docs/screenshot-night.png" width="49%" alt="Night theme"/>
+</p>
 
-| Part | Engine | First use | Offline |
+## Highlights
+
+- **She's alive** — idle wandering, glances, yawns, stretches, a grand piano she plays on her own, day/night themes, and a camera that follows her around the room.
+- **Talks and listens** — neural text-to-speech (Kokoro) with selectable voices, and push-to-talk (Whisper) so you can speak to her. Both run locally.
+- **Sees** — turn on your camera or attach up to 4 photos; her brain is natively multimodal and will describe what's in front of her.
+- **Your choice of brain**:
+  - **Local, offline** — Gemma 4 E4B (with vision) or Gemma 3n E2B via llama.cpp, accelerated on your GPU (Vulkan/CUDA) when available.
+  - **Cloud** — any OpenAI-compatible API: OpenAI, Google Gemini, Groq, OpenRouter, Ollama, LM Studio, or a custom URL.
+- **The little things** — a task list she manages from conversation, stopwatch/timers/wake-up alarms, idle chatter, personality presets, zoom, sound toggle.
+
+## Install
+
+### Linux
+
+Download `Saphira-1.0.0.AppImage` from [Releases](../../releases), then:
+
+```bash
+chmod +x Saphira-1.0.0.AppImage
+./Saphira-1.0.0.AppImage
+```
+
+Add it to your app launcher / taskbar:
+
+```bash
+mkdir -p ~/.local/share/saphira-desktop ~/.local/share/icons/hicolor/512x512/apps ~/.local/share/applications
+cp Saphira-1.0.0.AppImage ~/.local/share/saphira-desktop/Saphira.AppImage
+cp docs/icon.png ~/.local/share/icons/hicolor/512x512/apps/saphira-desktop.png
+cat > ~/.local/share/applications/saphira-desktop.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Saphira
+Comment=Anime companion with fully-local AI
+Exec=/home/YOU/.local/share/saphira-desktop/Saphira.AppImage
+Icon=/home/YOU/.local/share/icons/hicolor/512x512/apps/saphira-desktop.png
+Terminal=false
+Categories=Utility;
+StartupWMClass=saphira-desktop
+EOF
+update-desktop-database ~/.local/share/applications 2>/dev/null || true
+```
+
+(`.deb` and Windows `.exe` installers are also in Releases.)
+
+### Windows
+
+Run `Saphira Setup 1.0.0.exe`. The local-brain runtime downloads itself on first use.
+
+## Give her a brain
+
+On first launch she offers a choice — everything else (voice, ears) downloads automatically in the background with visible progress:
+
+| Brain | Download | Sees images | Notes |
 |---|---|---|---|
-| Brain (cloud) | any OpenAI-compatible `/chat/completions` (OpenAI, Gemini, Groq, OpenRouter, Ollama, LM Studio, custom URL) | API key | — |
-| Brain (local) | llama.cpp llama-server + Gemma 4 E4B (vision) / Gemma 3n E2B | 0 GB if already in /mnt/backup/llm-models, else 3–5 GB | ✅ |
-| Voice | Kokoro 82M q8 (onnxruntime-node) | ~90 MB download | ✅ |
-| Ears | Whisper tiny.en q8 (transformers.js) | ~40 MB download | ✅ |
+| **Gemma 4 E4B** | ~5.1 GB | ✅ | Recommended — Google's multimodal model, runs on your GPU |
+| **Gemma 3n E2B** | ~3.0 GB | — | Lighter; text-only under llama.cpp |
+| Cloud (any OpenAI-compatible) | — | if the model supports it | Add key + base URL + model in ⚙ Settings |
 
-Everything else is the Saphira you know: the 3D avatar, piano, tasks, timers/alarms, chatter, themes, zoom. Models download once (with progress pills/cards) into the app's data dir (`~/.config/Saphira/models/` when installed); after that, brain + voice + ears need zero network.
+**Already have GGUF files?** Skip the download: ⚙ Settings → *Local* → **Add models folder…** and point her at any directory containing the GGUFs (e.g. `gemma-4-E4B-it-Q4_0.gguf` + `mmproj-gemma-4-E4B-it-Q8_0.gguf`). She scans it, and anything she recognizes becomes usable immediately.
 
-## Run it (dev)
+Models are cached under the app's data directory and only ever downloaded once.
 
-```bash
-npm install        # electron + llama.cpp/ONNX prebuilt binaries
-npm run desktop:dev    # vite dev server + electron window
-```
+## Offline
 
-## Package it
+After the one-time downloads, chat, speech, listening, vision, piano, tasks and alarms all run with the network unplugged. Nothing you say leaves your machine in local mode.
+
+## Build from source
 
 ```bash
-npm run desktop:package    # → release/Saphira-*.AppImage, *.deb, *.exe (NSIS)
+npm install
+npm run desktop:dev        # dev server + electron window
+npm run desktop:package    # → release/: AppImage + deb (Linux)
+npm run desktop:package:win
 ```
 
-Notes:
-- **GPU**: she prefers an existing llama-server build (checked at `~/llama.cpp/build/bin/`) and, when it reports Vulkan/CUDA devices, offloads all layers (`-ngl 99 --flash-attn on --jinja`). Otherwise the official CPU binary is downloaded.
-- **Models resolve from  first**, then , then download.
-- **Windows**: on Windows the llama-server binary is fetched automatically on first brain use (one-time, needs internet).
-- The installer ships without models by design — first-run cards walk through picking a brain, and the voice/ears download on first use with visible progress.
+Requirements: Node 20+, ~2 GB disk for dependencies. GPU acceleration is automatic — she detects Vulkan/CUDA devices via llama.cpp and offloads all layers; a CPU-only llama-server is downloaded as fallback.
 
-## Architecture
+## Troubleshooting
 
-```
-desktop/main.ts        Electron main: window, app:// protocol, IPC registry
-desktop/protocol       app://saphira/* → dist-desktop/* (all asset paths unchanged)
-desktop/brain.ts       OpenAI-compatible cloud chat (net.fetch, no CORS) + local routing
-desktop/llm.ts         GGUF catalog, download w/ progress, lazy chat session
-desktop/tts.ts         Kokoro synthesis → Int16 PCM chunks over IPC
-desktop/stt.ts         Whisper pipeline for 16 kHz mono Float32
-desktop/preload.cts    contextBridge → window.saphiraDesktop (the only renderer API)
-src/                   the forked Saphira renderer; feature-detects window.saphiraDesktop
-```
+- **She replies but says nothing** — check ⚙ → *Voice engine* is `Kokoro`; the first message warms the voice model.
+- **Mic does nothing** — allow microphone access when prompted (push-to-talk stops after ~2 s of silence; tap the mic to stop early).
+- **"llama-server exited"** — open ⚙ → Local and re-pick her brain; incomplete model downloads are detected and re-fetched.
+- **GPU offload** — requires a llama.cpp build with Vulkan/CUDA (she looks for `~/llama.cpp/build/bin/llama-server` first).
 
-Renderer keeps working as a plain web page when `window.saphiraDesktop` is absent — which is exactly what keeps the mobile door open:
+## Android
 
-## Android later
+Electron doesn't run on Android. The renderer is a plain web app, so the roadmap is a Capacitor wrap producing an APK, with Kokoro/Whisper running on-device via WebGPU/WASM and cloud or self-hosted brains until an on-device LLM lands.
 
-Electron can't run on Android. The path there is a **Capacitor** wrap of this same renderer into an APK; the AI engines then swap to their on-device builds:
+## Credits
 
-- Kokoro + Whisper: already have WASM/WebGPU runtimes via transformers.js (renderer-side).
-- Local LLM: needs llama.cpp JNI bindings on Android — its own project phase. Until then the APK can use cloud brains (OpenAI-compatible) or Ollama on a home server.
-
-Smoke checks (headless, used to verify builds): `SAPHIRA_SMOKE=1 npx electron build/desktop/main.js` writes facts + a screenshot; flags `SAPHIRA_MOCK_BRAIN`, `SAPHIRA_SMOKE_LOCAL`, `SAPHIRA_SMOKE_TTS`, `SAPHIRA_SMOKE_STT` exercise the cloud/local brain, voice, and ears end-to-end.
+Built on [llama.cpp](https://github.com/ggml-org/llama.cpp), [Gemma](https://deepmind.google/models/gemma/), [Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX), [Whisper](https://github.com/openai/whisper), [three.js](https://threejs.org/), [Transformers.js](https://huggingface.co/docs/transformers.js), [Electron](https://www.electronjs.org/).

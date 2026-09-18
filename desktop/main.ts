@@ -85,7 +85,62 @@ function createWindow(): BrowserWindow {
     void win.loadURL('app://saphira/index.html');
   }
   maybeRunSmoke(win);
+  maybeRunShots(win);
   return win;
+}
+
+// SAPHIRA_SHOTS=<dir>: capture README screenshots by driving the real UI.
+function maybeRunShots(win: BrowserWindow): void {
+  if (process.env.SAPHIRA_SHOTS !== '1') return;
+  const out = process.env.SAPHIRA_SHOTS_DIR || 'shots';
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      void (async () => {
+        fs.mkdirSync(out, { recursive: true });
+        const shot = async (name: string, setup?: string, settle = 900) => {
+          if (setup) await win.webContents.executeJavaScript(setup);
+          await new Promise((r) => setTimeout(r, settle));
+          const img = await win.webContents.capturePage();
+          fs.writeFileSync(path.join(out, name + '.png'), img.toPNG());
+          console.log('[shots]', name);
+        };
+        // seed a believable conversation so the chat screenshot reads real
+        const seed = `
+          const b = document.getElementById('bubbles');
+          b.innerHTML = '';
+          const u1 = document.createElement('div'); u1.className = 'bubble user';
+          u1.innerHTML = 'Play me something on the piano';
+          const m1 = document.createElement('div'); m1.className = 'bubble bot';
+          m1.textContent = "Ooh yes — give me a second to hop on the bench. This one's a little lullaby I've been practicing!";
+          const u2 = document.createElement('div'); u2.className = 'bubble user';
+          u2.innerHTML = 'That was beautiful! What do you see in this picture?';
+          const im = document.createElement('img'); im.src = '/bg.jpg';
+          im.style.cssText = 'max-height:110px;border-radius:10px;display:block;margin-top:6px';
+          u2.appendChild(im);
+          const m2 = document.createElement('div'); m2.className = 'bubble bot';
+          m2.textContent = 'Ooh, the city lights at dusk! All those towers glowing purple and blue — it looks like the skyline right outside our window.';
+          b.append(m1, u1, u2, m2);
+          b.classList.remove('idle');
+          // a photo attached in the composer
+          const tray = document.getElementById('attachTray');
+          tray.style.display = 'flex'; tray.innerHTML = '';
+          const thumb = document.createElement('div'); thumb.className = 'attach-thumb';
+          const ti = document.createElement('img'); ti.src = '/bg.jpg';
+          const tx = document.createElement('button'); tx.textContent = '✕';
+          thumb.append(ti, tx); tray.appendChild(thumb);
+        `;
+        await shot('saphira-main');
+        await shot('saphira-chat', seed);
+        await shot('saphira-settings', `
+          document.getElementById('gear').click();`, 1200);
+        await shot('saphira-night', `
+          document.getElementById('closeDrawer').click();
+          document.getElementById('themeBtn').click();
+          document.getElementById('bubbles').innerHTML='';`, 2500);
+        app.quit();
+      })().catch((e) => { console.error('[shots] failed', e); app.quit(); });
+    }, 12000);
+  });
 }
 
 // SAPHIRA_SMOKE=1: wait for her to load, collect renderer facts + console
