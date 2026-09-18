@@ -755,7 +755,7 @@ function setupLocalBrainUI(){
       browse.disabled=true;
       const r=await window.saphiraDesktop!.llmBrowseDir();
       browse.disabled=false;
-      if(r.ok) render();
+      if(r.ok){ flashLive('Folder added — pick her brain below'); render(); }
     });
     dl.appendChild(browse);
     dirRow.appendChild(dl);
@@ -763,7 +763,7 @@ function setupLocalBrainUI(){
       const dirs=await window.saphiraDesktop!.llmGetDirs();
       if(dirs.length){
         const lbl=document.createElement('div'); lbl.style.cssText='font-size:11px;opacity:.6;word-break:break-all';
-        lbl.textContent='Scanning: ' + dirs.join(', ');
+        lbl.textContent='Folders: ' + dirs.join(',  ');
         dirRow.appendChild(lbl);
       }
     }catch{}

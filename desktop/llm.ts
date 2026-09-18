@@ -29,11 +29,16 @@ function scanDirs(): string[] {
   return dirs;
 }
 
-function findInDirs(rel: string | undefined): string | null {
+function findInDirs(rel: string | undefined, minBytes?: number): string | null {
   if (!rel) return null;
   for (const d of scanDirs()) {
     const p = path.join(d, rel);
-    try { if (fs.existsSync(p)) return p; } catch { /* dir missing */ }
+    try {
+      const st = fs.statSync(p);
+      // an interrupted download leaves a truncated file — treat it as missing
+      // so it gets re-downloaded instead of crashing the brain at load time
+      if (st.isFile() && (!minBytes || st.size >= minBytes * 0.9)) return p;
+    } catch { /* dir or file missing */ }
   }
   return null;
 }
@@ -88,7 +93,7 @@ type ModelState = 'not-downloaded' | 'downloading' | 'loading' | 'ready' | 'erro
 const transient = new Map<string, { state: ModelState; progress?: number; error?: string }>();
 const activeFile = () => path.join(llmDir(), 'active.json');
 
-let serverProc: ChildProcess | null = null;
+let serverProc: (ChildProcess & { exitTail?: () => string }) | null = null;
 let serverPort = 0;
 let serverModelId: string | null = null;
 let bootPromise: Promise<void> | null = null;
@@ -233,6 +238,22 @@ async function downloadTo(url: string, dest: string, modelId?: string): Promise<
 
 // ---------- server lifecycle ----------
 
+// pick a port that is actually free — a leftover llama-server on 18963 used
+// to make the new spawn die on bind and read as 'exited during startup'
+async function freePort(start: number): Promise<number> {
+  const { createServer } = await import('node:net');
+  for (let p = start; p < start + 25; p++) {
+    const ok = await new Promise<boolean>((resolve) => {
+      const srv = createServer();
+      srv.once('error', () => resolve(false));
+      srv.once('listening', () => srv.close(() => resolve(true)));
+      srv.listen(p, '127.0.0.1');
+    });
+    if (ok) return p;
+  }
+  return start;
+}
+
 async function fetchHealth(port: number): Promise<boolean> {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1200) });
@@ -249,7 +270,7 @@ async function ensureServer(): Promise<number> {
     const seq = ++loadSeq;
     const entry = resolveUsableEntry();
     const id = entry?.id ?? want!;
-    const modelPath = entry ? findInDirs(entry.file) : null;
+    const modelPath = entry ? findInDirs(entry.file, entry.bytes) : null;
     if (!entry || !modelPath) {
       throw new Error('No local model found — pick one in Settings, or add your models folder there');
     }
@@ -259,12 +280,24 @@ async function ensureServer(): Promise<number> {
     try {
       stopServer(); // kill any previous instance (model may differ)
       const bin = await ensureServerBinary();
-      const port = 18963;
+      const port = await freePort(18963);
       const args = ['-m', modelPath, '-c', '8192', '--port', String(port), '--host', '127.0.0.1', '--no-webui', '--jinja'];
       if (engineGpu) args.push('-ngl', '99', '--flash-attn', 'on');
-      const mmproj = findInDirs(entry.mmprojFile);
+      const mmproj = findInDirs(entry.mmprojFile, entry.mmprojBytes);
       if (mmproj) args.push('--mmproj', mmproj);
-      serverProc = spawn(bin, args, { cwd: path.dirname(bin), stdio: 'ignore' });
+      let multimodal = !!mmproj;
+      // AppImages export LD_LIBRARY_PATH into their bundled libs; llama-server
+      // inheriting that crashes at load. Give it a clean environment.
+      const env = { ...process.env };
+      delete env.LD_LIBRARY_PATH; delete env.LD_PRELOAD;
+      delete env.APPDIR; delete env.APPIMAGE; delete env.ARGV0;
+      serverProc = spawn(bin, args, { cwd: path.dirname(bin), stdio: ['ignore', 'ignore', 'pipe'], env });
+      const errTail: string[] = [];
+      serverProc.stderr?.on('data', (d: Buffer) => {
+        errTail.push(String(d));
+        if (errTail.length > 40) errTail.shift();
+      });
+      serverProc.exitTail = () => errTail.join('').slice(-500);
       serverModelId = id;
       serverPort = port;
       // wait for /health (model load can take a while)
@@ -272,7 +305,25 @@ async function ensureServer(): Promise<number> {
       let up = false;
       while (Date.now() < deadline) {
         if (seq !== loadSeq) return; // superseded by a newer boot
-        if (serverProc.exitCode !== null) throw new Error('llama-server exited during startup');
+        if (serverProc.exitCode !== null) {
+          const tail = serverProc.exitTail ? serverProc.exitTail() : '';
+          // a broken projector shouldn't take the whole brain down —
+          // retry once text-only and let text chat keep working
+          if (multimodal && /multimodal|mmproj/i.test(tail)) {
+            multimodal = false;
+            args.splice(args.indexOf('--mmproj'), 2);
+            serverProc = spawn(bin, args, { cwd: path.dirname(bin), stdio: ['ignore', 'ignore', 'pipe'], env });
+            serverProc.exitTail = () => errTail.join('').slice(-500);
+            errTail.length = 0;
+            serverProc.stderr?.on('data', (d: Buffer) => {
+              errTail.push(String(d));
+              if (errTail.length > 40) errTail.shift();
+            });
+            emit({ type: 'state', modelId: id, state: 'loading', error: 'vision projector failed to load — running text-only' });
+            continue;
+          }
+          throw new Error(`llama-server exited (code ${serverProc.exitCode}) ${tail.slice(-300)}`);
+        }
         if (await fetchHealth(port)) { up = true; break; }
         await new Promise((r) => setTimeout(r, 800));
       }
@@ -311,7 +362,7 @@ async function download(modelId: string): Promise<{ ok: boolean; error?: string 
   downloading = true;
   try {
     // already complete? just select + boot it
-    if (findInDirs(entry.file) && (!entry.mmprojFile || findInDirs(entry.mmprojFile))) {
+    if (findInDirs(entry.file, entry.bytes) && (!entry.mmprojFile || findInDirs(entry.mmprojFile, entry.mmprojBytes))) {
       writeActiveId(modelId);
       void ensureServer().catch(() => {});
       return { ok: true };
@@ -349,7 +400,7 @@ export function registerLlmIpc(): void {
   ipcMain.handle('llm:status', () => ({
     models: CATALOG.map((c) => {
       const t = transient.get(c.id);
-      const downloaded = !!findInDirs(c.file);
+      const downloaded = !!findInDirs(c.file, c.bytes);
       const state: ModelState = t?.state === 'downloading' ? 'downloading'
         : t?.state === 'loading' ? 'loading'
         : t?.state === 'error' ? 'error'
@@ -362,7 +413,8 @@ export function registerLlmIpc(): void {
   ipcMain.handle('llm:download', (_e, modelId: string) => download(modelId));
   ipcMain.handle('llm:getDirs', () => scanDirs().slice(1));
   ipcMain.handle('llm:browseDir', async () => {
-    const r = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Pick your models folder' });
+    const win = BrowserWindow.getAllWindows()[0];
+    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Pick your models folder' });
     if (r.canceled || !r.filePaths[0]) return { ok: false };
     // remember it and rescan — any catalog GGUF inside becomes usable instantly
     const cur = (() => { try { return JSON.parse(fs.readFileSync(path.join(llmDir(), 'scan-dirs.json'), 'utf8')); } catch { return []; } })();
