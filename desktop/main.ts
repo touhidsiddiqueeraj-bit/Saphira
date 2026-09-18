@@ -128,7 +128,7 @@ function maybeRunSmoke(win: BrowserWindow): void {
           const t0 = Date.now();
           extra.local = await win.webContents.executeJavaScript(`
             (async () => {
-              const dl = await window.saphiraDesktop.llmDownload('qwen2.5-1.5b');
+              const dl = await window.saphiraDesktop.llmDownload('gemma-4-e4b');
               const st = await window.saphiraDesktop.llmStatus();
               const chat = await window.saphiraDesktop.brainChat({
                 mode: 'local',

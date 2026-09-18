@@ -2,6 +2,9 @@ import { ipcMain, BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
+import { Readable, Transform } from 'node:stream';
+import { pipeline as streamPipeline } from 'node:stream/promises';
 import { llmDir } from './modelStore.js';
 import { setLocalChat, cloudChat, type BrainChatPayload } from './brain.js';
 
@@ -11,6 +14,19 @@ import { setLocalChat, cloudChat, type BrainChatPayload } from './brain.js';
 // into <userData>/models/llm; after that she thinks fully offline.
 
 const LLAMA_SERVER_DIR = () => path.join(llmDir(), 'llama-server');
+
+// known model libraries — the catalog resolves GGUFs from here first so
+// locally-stored models are used instead of re-downloading
+const MODEL_DIRS = [llmDir(), '/mnt/backup/llm-models'];
+
+function findInDirs(rel: string | undefined): string | null {
+  if (!rel) return null;
+  for (const d of MODEL_DIRS) {
+    const p = path.join(d, rel);
+    try { if (fs.existsSync(p)) return p; } catch { /* dir missing */ }
+  }
+  return null;
+}
 
 type CatalogEntry = {
   id: string;
@@ -121,7 +137,22 @@ function findFile(root: string, name: string): string | null {
   return null;
 }
 
+const ENGINE_CANDIDATES = () => [
+  path.join(process.env.HOME || '', 'llama.cpp', 'build', 'bin', 'llama-server' + (process.platform === 'win32' ? '.exe' : '')),
+];
+
+let engineBinary: string | null = null;
+let engineGpu = false;
+
 async function ensureServerBinary(): Promise<string> {
+  if (engineBinary) return engineBinary;
+  // 1) existing installs — typically a GPU (Vulkan) build
+  for (const cand of ENGINE_CANDIDATES()) {
+    try {
+      if (fs.existsSync(cand)) { engineBinary = cand; engineGpu = await detectGpu(cand); return cand; }
+    } catch { /* not there */ }
+  }
+  // 2) previously downloaded official build
   const dir = LLAMA_SERVER_DIR();
   const exeName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
   const found = findFile(dir, exeName);
@@ -142,7 +173,20 @@ async function ensureServerBinary(): Promise<string> {
   const bin = findFile(dir, exeName);
   if (!bin) throw new Error('llama-server not found in archive');
   if (process.platform !== 'win32') fs.chmodSync(bin, 0o755);
+  engineBinary = bin;
+  engineGpu = await detectGpu(bin);
   return bin;
+}
+
+// --list-devices prints one line per accelerator (Vulkan0: AMD Radeon RX 580…).
+// GPU present → offload every layer + flash attention; else stay on CPU.
+async function detectGpu(bin: string): Promise<boolean> {
+  try {
+    const out = await new Promise<string>((resolve, reject) => {
+      execFile(bin, ['--list-devices'], { timeout: 15000 }, (err, stdout) => err ? reject(err) : resolve(String(stdout)));
+    });
+    return /Vulkan\d|CUDA\d|SYCL\d|ROCm/i.test(out);
+  } catch { return false; }
 }
 
 async function downloadTo(url: string, dest: string, modelId?: string): Promise<void> {
@@ -150,24 +194,23 @@ async function downloadTo(url: string, dest: string, modelId?: string): Promise<
   const res = await fetch(url, { redirect: 'follow' });
   if (!res.ok || !res.body) throw new Error(`download failed ${res.status}`);
   const total = Number(res.headers.get('content-length') || 0);
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
   let got = 0; let lastPct = -10;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    got += value.length;
-    if (total && modelId) {
-      const pct = Math.floor((got / total) * 100);
-      if (pct >= lastPct + 3) {
-        lastPct = pct;
-        transient.set(modelId, { state: 'downloading', progress: got / total });
-        emit({ type: 'progress', modelId, progress: got / total });
+  const counter = new Transform({
+    transform(chunk, _enc, cb) {
+      got += chunk.length;
+      if (total && modelId) {
+        const pct = Math.floor((got / total) * 100);
+        if (pct >= lastPct + 3) {
+          lastPct = pct;
+          transient.set(modelId, { state: 'downloading', progress: got / total });
+          emit({ type: 'progress', modelId, progress: got / total });
+        }
       }
-    }
-  }
-  fs.writeFileSync(dest, Buffer.concat(chunks));
+      cb(null, chunk);
+    },
+  });
+  // stream straight to disk — multi-GB models must never buffer in RAM
+  await streamPipeline(Readable.fromWeb(res.body as any), counter, createWriteStream(dest));
 }
 
 // ---------- server lifecycle ----------
@@ -188,7 +231,7 @@ async function ensureServer(): Promise<number> {
     const seq = ++loadSeq;
     const id = want!;
     const entry = CATALOG.find((c) => c.id === id);
-    const modelPath = entry ? fileFor(entry.file) : null;
+    const modelPath = entry ? findInDirs(entry.file) : null;
     if (!entry || !modelPath) throw new Error('No local model downloaded yet');
     transient.set(id, { state: 'loading' });
     emit({ type: 'state', modelId: id, state: 'loading' });
@@ -196,8 +239,9 @@ async function ensureServer(): Promise<number> {
       stopServer(); // kill any previous instance (model may differ)
       const bin = await ensureServerBinary();
       const port = 18963;
-      const args = ['-m', modelPath, '-c', '8192', '--port', String(port), '--host', '127.0.0.1', '--no-webui'];
-      const mmproj = fileFor(entry.mmprojFile);
+      const args = ['-m', modelPath, '-c', '8192', '--port', String(port), '--host', '127.0.0.1', '--no-webui', '--jinja'];
+      if (engineGpu) args.push('-ngl', '99', '--flash-attn', 'on');
+      const mmproj = findInDirs(entry.mmprojFile);
       if (mmproj) args.push('--mmproj', mmproj);
       serverProc = spawn(bin, args, { cwd: path.dirname(bin), stdio: 'ignore' });
       serverModelId = id;
@@ -245,10 +289,16 @@ async function download(modelId: string): Promise<{ ok: boolean; error?: string 
   if (downloading) return { ok: false, error: 'already downloading' };
   downloading = true;
   try {
+    // already complete? just select + boot it
+    if (findInDirs(entry.file) && (!entry.mmprojFile || findInDirs(entry.mmprojFile))) {
+      writeActiveId(modelId);
+      void ensureServer().catch(() => {});
+      return { ok: true };
+    }
     await ensureServerBinary(); // small — fetch the engine before the big model
     emit({ type: 'state', modelId, state: 'downloading', progress: 0 });
-    await downloadTo(entry.url, path.join(llmDir(), entry.file), modelId);
-    if (entry.mmprojUrl && entry.mmprojFile) {
+    if (!findInDirs(entry.file)) await downloadTo(entry.url, path.join(llmDir(), entry.file), modelId);
+    if (entry.mmprojUrl && entry.mmprojFile && !findInDirs(entry.mmprojFile)) {
       await downloadTo(entry.mmprojUrl, path.join(llmDir(), entry.mmprojFile), modelId);
     }
     writeActiveId(modelId);
@@ -278,7 +328,7 @@ export function registerLlmIpc(): void {
   ipcMain.handle('llm:status', () => ({
     models: CATALOG.map((c) => {
       const t = transient.get(c.id);
-      const downloaded = !!fileFor(c.file);
+      const downloaded = !!findInDirs(c.file);
       const state: ModelState = t?.state === 'downloading' ? 'downloading'
         : t?.state === 'loading' ? 'loading'
         : t?.state === 'error' ? 'error'
@@ -290,7 +340,7 @@ export function registerLlmIpc(): void {
   }));
   ipcMain.handle('llm:download', (_e, modelId: string) => download(modelId));
   ipcMain.handle('llm:select', async (_e, modelId: string) => {
-    if (!fileFor(CATALOG.find((c) => c.id === modelId)?.file)) return { ok: false, error: 'model not downloaded' };
+    if (!findInDirs(CATALOG.find((c) => c.id === modelId)?.file)) return { ok: false, error: 'model not downloaded' };
     writeActiveId(modelId);
     void ensureServer().catch(() => {});
     return { ok: true };

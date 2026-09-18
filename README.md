@@ -9,7 +9,7 @@ This is a **fork** of the Saphira lite web app (`~/Documents/Saphira`), copied a
 | Part | Engine | First use | Offline |
 |---|---|---|---|
 | Brain (cloud) | any OpenAI-compatible `/chat/completions` (OpenAI, Gemini, Groq, OpenRouter, Ollama, LM Studio, custom URL) | API key | — |
-| Brain (local) | node-llama-cpp + Qwen2.5 1.5B/3B GGUF | ~1–2 GB download | ✅ |
+| Brain (local) | llama.cpp llama-server + Gemma 4 E4B (vision) / Gemma 3n E2B | 0 GB if already in /mnt/backup/llm-models, else 3–5 GB | ✅ |
 | Voice | Kokoro 82M q8 (onnxruntime-node) | ~90 MB download | ✅ |
 | Ears | Whisper tiny.en q8 (transformers.js) | ~40 MB download | ✅ |
 
@@ -29,7 +29,9 @@ npm run desktop:package    # → release/Saphira-*.AppImage, *.deb, *.exe (NSIS)
 ```
 
 Notes:
-- **Windows**: llama.cpp ships its Linux prebuilt in the package; on Windows the matching binary is fetched automatically on first brain use (one-time, needs internet).
+- **GPU**: she prefers an existing llama-server build (checked at `~/llama.cpp/build/bin/`) and, when it reports Vulkan/CUDA devices, offloads all layers (`-ngl 99 --flash-attn on --jinja`). Otherwise the official CPU binary is downloaded.
+- **Models resolve from  first**, then , then download.
+- **Windows**: on Windows the llama-server binary is fetched automatically on first brain use (one-time, needs internet).
 - The installer ships without models by design — first-run cards walk through picking a brain, and the voice/ears download on first use with visible progress.
 
 ## Architecture
