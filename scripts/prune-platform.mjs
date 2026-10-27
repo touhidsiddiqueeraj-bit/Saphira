@@ -15,8 +15,20 @@ const dirEntries = (p) => { try { return fs.readdirSync(p); } catch { return [];
 
 // onnxruntime-node/bin/napi-v{3,6}/{linux,win32,darwin}/<arch>
 for (const napi of dirEntries(path.join(nm, 'onnxruntime-node', 'bin'))) {
-  for (const plat of dirEntries(path.join(nm, 'onnxruntime-node', 'bin', napi))) {
-    if (plat !== wantOrt) rm(path.join(nm, 'onnxruntime-node', 'bin', napi, plat));
+  const napiDir = path.join(nm, 'onnxruntime-node', 'bin', napi);
+  for (const plat of dirEntries(napiDir)) {
+    if (plat !== wantOrt) { rm(path.join(napiDir, plat)); continue; }
+    // strip hardware-provider add-ons inside the KEPT platform dir.
+    // onnxruntime-node's postinstall fetches libonnxruntime_providers_cuda.so
+    // (343 MB!) and _providers_tensorrt.so; Saphira runs whisper via the CPU
+    // provider only, so these are dead weight in every installer.
+    for (const arch of dirEntries(path.join(napiDir, plat))) {
+      for (const f of dirEntries(path.join(napiDir, plat, arch))) {
+        if (/^libonnxruntime_providers_/i.test(f) || /^onnxruntime_providers_/i.test(f)) {
+          rm(path.join(napiDir, plat, arch, f));
+        }
+      }
+    }
   }
 }
 
@@ -26,4 +38,4 @@ for (const d of dirEntries(path.join(nm, '@node-llama-cpp'))) {
   if (!isPlain) rm(path.join(nm, '@node-llama-cpp', d));
 }
 
-console.log(`pruned node_modules to ${want} natives`);
+console.log(`pruned node_modules to ${want} natives (providers stripped)`);
