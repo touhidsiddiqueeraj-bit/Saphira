@@ -31,8 +31,13 @@ export async function cloudChat(p: BrainChatPayload): Promise<string> {
     ...p.history,
     { role: 'user', content: userContent },
   ];
+  // a hung endpoint used to leave her "thinking" bubble spinning forever,
+  // locking the chat — every brain call now has a hard deadline
+  const isLocal = /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(base);
+  const timeoutMs = isLocal ? 300_000 : 120_000;
   const call = (withJsonFormat: boolean) => net.fetch(base + '/chat/completions', {
     method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       'Content-Type': 'application/json',
       ...(p.apiKey ? { Authorization: 'Bearer ' + p.apiKey } : {}),
@@ -41,7 +46,7 @@ export async function cloudChat(p: BrainChatPayload): Promise<string> {
       model: p.model,
       messages,
       temperature: 0.9,
-      max_tokens: 500,
+      max_tokens: 400,
       ...(withJsonFormat ? { response_format: { type: 'json_object' } } : {}),
     }),
   });

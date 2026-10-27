@@ -89,14 +89,18 @@ npm run desktop:package    # → release/: AppImage + deb (Linux)
 npm run desktop:package:win
 ```
 
+CI runs on every push (build + typecheck), CodeQL scans the codebase weekly, and pushing a `v*` tag builds and publishes the installers — see `.github/workflows/`.
+
 Requirements: Node 20+, ~2 GB disk for dependencies. GPU acceleration is automatic — she detects Vulkan/CUDA devices via llama.cpp and offloads all layers; a CPU-only llama-server is downloaded as fallback.
 
 ## Troubleshooting
 
 - **She replies but says nothing** — check ⚙ → *Voice engine* is `Kokoro`; the first message warms the voice model.
 - **Mic does nothing** — allow microphone access when prompted (push-to-talk stops after ~2 s of silence; tap the mic to stop early).
-- **"llama-server exited"** — open ⚙ → Local and re-pick her brain; incomplete model downloads are detected and re-fetched.
+- **"llama-server exited"** — open ⚙ → Local and re-pick her brain; incomplete model downloads are detected and re-fetched. A GPU that runs out of memory is detected automatically and she retries on CPU.
 - **GPU offload** — requires a llama.cpp build with Vulkan/CUDA (she looks for `~/llama.cpp/build/bin/llama-server` first).
+- **Memory safety** — she checks your RAM and VRAM *before* loading a brain, offloads only the layers that actually fit, watches free memory while she thinks (and stops her brain rather than letting the machine OOM), and parks an idle brain after 20 minutes so your other apps get the memory back. If a brain is too heavy she tells you to pick the lighter model.
+- **First reply after starting the app is slow** — that was the model load; she now warm-starts her brain in the background at launch, and a loading screen shows her (and its) progress.
 
 ## Android
 

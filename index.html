@@ -12,6 +12,17 @@
 </head>
 <body>
 <div id="app"></div>
+<!-- boot overlay: painted from the very first frame (pure CSS), removed once
+     her 3D model is ready. Shows avatar progress + local-brain wake status. -->
+<div id="boot" role="status" aria-label="Saphira is starting up">
+  <div class="boot-inner">
+    <div class="boot-orb"></div>
+    <h1 class="boot-title">Saphira</h1>
+    <div class="boot-bar"><div id="bootBar"></div></div>
+    <div class="boot-status" id="bootStatus">getting ready…</div>
+    <div class="boot-brain" id="bootBrain" style="display:none"></div>
+  </div>
+</div>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

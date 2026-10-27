@@ -1,0 +1,61 @@
+name: CodeQL
+
+# CodeQL security scanning for the JavaScript/TypeScript codebase
+# (renderer + Electron main process). Runs on pushes/PRs to main and weekly.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * 1'  # Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  # required for all workflows
+  security-events: write
+  # required to fetch internal/private code
+  contents: read
+  # required for workflows in private repositories
+  actions: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - name: Install dependencies (for module resolution)
+        # CodeQL's JS/TS extractor analyzes source, no build needed — but it
+        # still wants node_modules present to resolve imports. Skip Electron's
+        # ~100 MB binary download; it is not analyzed.
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'

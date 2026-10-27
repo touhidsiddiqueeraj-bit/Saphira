@@ -1,0 +1,57 @@
+name: Release
+
+# CD: build the Linux desktop packages (AppImage + deb) whenever a v* tag is
+# pushed, attach them to a GitHub Release. Windows .exe builds can be added
+# later with a windows-latest twin job running `npm run desktop:package:win`.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Build Linux packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+        env:
+          # electron's postinstall only downloads a binary we don't need for
+          # packaging — electron-builder fetches its own copies
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Build renderer + electron main
+        run: npm run desktop:build
+
+      - name: Prune natives + package (AppImage, deb)
+        run: node scripts/prune-platform.mjs linux && npx electron-builder --linux AppImage deb
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload packages as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: saphira-linux
+          path: release/*
+          retention-days: 14
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

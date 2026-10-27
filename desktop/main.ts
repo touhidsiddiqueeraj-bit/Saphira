@@ -159,7 +159,12 @@ function maybeRunSmoke(win: BrowserWindow): void {
     } catch { /* screenshot best-effort */ }
     app.quit();
   };
-  win.webContents.on('console-message', (_e, _level, message) => errors.push(String(message).slice(0, 300)));
+  // Electron >= 30 emits a single event object; older versions passed
+  // (event, level, message) — handle both so smoke runs capture real errors
+  win.webContents.on('console-message', (e: any, _level?: any, msg?: string) => {
+    const message = String(msg ?? e?.message ?? '');
+    if (message) errors.push(message.slice(0, 300));
+  });
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => {
       void (async () => {

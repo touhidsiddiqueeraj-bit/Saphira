@@ -571,7 +571,8 @@ function wire(){
 function submitChat(){
   const inp=document.getElementById('chatInput') as HTMLInputElement;
   const t=inp.value.trim();
-  if((!t && !pendingImages.length) || isThinking) return;
+  if((!t && !pendingImages.length)) return;
+  if(isThinking){ flashLive('She is still thinking — one moment…'); return; } // no more silent drops
   lastInteract=Date.now();
   tts.unlock();
   inp.value='';
@@ -923,6 +924,9 @@ async function pttToggle(){
     window.clearInterval(poller);
     window.clearTimeout(cap);
     try{ if(rec.state!=='inactive') rec.stop(); }catch{}
+    // FIX: this analysis context used to leak on every tap — after ~6 taps the
+    // browser refuses new AudioContexts and push-to-talk silently dies
+    try{ void ac.close(); }catch{}
   };
   pttStop=stop;
   rec.onstop=async()=>{
@@ -1044,9 +1048,9 @@ function addBubble(role:'user'|'bot', text:string, thinking=false){
   if(bubbleTimer) clearTimeout(bubbleTimer);
   bubbleTimer=window.setTimeout(()=> bubbles.classList.add('idle'), 20000);
   const div=document.createElement('div');
-  div.className='bubble '+(role==='user'?'user':'bot');
+  div.className='bubble '+(role==='user'?'user':'bot')+(thinking?' thinking':'');
   if(thinking){
-    div.innerHTML=`<span style="width:14px;height:14px;border:2px solid #ddd;border-top-color:#111;border-radius:50%;display:inline-block;animation:spin .7s linear infinite" aria-label="thinking"></span>`;
+    div.innerHTML=`<span class="spin" aria-label="thinking"></span><span class="think-label"></span>`;
   } else {
     div.textContent=text;
   }
@@ -1077,8 +1081,19 @@ async function handleUser(text:string, images?:string[]){
   if(!settings.apiKey && !localBrain){ addBubble('bot','Add your chat API key in ⚙.'); return; }
   isThinking=true;
   const thinkEl=addBubble('bot','…', true);
+  const thinkLabel=thinkEl.querySelector('.think-label') as HTMLElement|null;
+  // brain boot/download progress shows next to the spinner instead of leaving
+  // her silently "thinking" for a minute after a restart or model switch
+  const offBrain=window.saphiraDesktop?.onLlmEvent((e)=>{
+    if(!thinkLabel) return;
+    if(e.state==='loading') thinkLabel.textContent = e.error ? String(e.error).slice(0,70) : 'waking her brain…';
+    else if(e.type==='progress') thinkLabel.textContent=`downloading her brain ${Math.round((e.progress??0)*100)}%`;
+    else if(e.state==='error') thinkLabel.textContent=String(e.error||'brain error').slice(0,70);
+  });
   try{
-    const reply=await chatWithBrain(text, history);
+    // FIX: images were dropped here — attached photos/camera captures never
+    // reached the brain, so she replied blind to everything you showed her
+    const reply=await chatWithBrain(text, history, images);
     history.push({role:'user', text}); history.push({role:'model', text: reply.text});
     if(history.length>12) history=history.slice(-12);
     thinkEl.remove();
@@ -1107,13 +1122,67 @@ async function handleUser(text:string, images?:string[]){
     const msg=String(e.message||e).slice(0,700);
     const is429 = msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
     const isNoBrain = /no local model|local brain not ready/i.test(msg);
+    const isMem = /not enough memory|out of memory|stopped to protect|ran out of memory/i.test(msg);
     addBubble('bot', is429 ? 'Busy — try again in a bit.'
       : isNoBrain ? 'No local brain found — pick one in ⚙ settings (you can also point me at a models folder there).'
+      : isMem ? 'That brain is too heavy for this PC — try the lighter Gemma 3n in ⚙ settings.'
       : `Brain error — ${msg.slice(0, 160)}`);
-  } finally { isThinking=false; }
+  } finally { offBrain?.(); isThinking=false; }
 }
 
 renderApp();
+
+// ---- boot overlay: covers first paint until her 3D model (and optionally her
+// local brain) is ready — the desktop warm-starts the brain at launch, so its
+// wake status shows here instead of a silent half-minute of nothing ----
+function setupBoot(){
+  const boot=document.getElementById('boot');
+  if(!boot) return;
+  const bar=document.getElementById('bootBar');
+  const status=document.getElementById('bootStatus');
+  const brainLine=document.getElementById('bootBrain');
+  const setPct=(p:number)=>{ if(bar) bar.style.width=`${Math.max(4,Math.min(100,p))}%`; };
+  const setBrain=(t:string)=>{ if(brainLine){ brainLine.textContent=t; brainLine.style.display = t?'block':'none'; } };
+  let hidden=false;
+  const hide=()=>{
+    if(hidden) return; hidden=true;
+    boot.classList.add('done');
+    setTimeout(()=>{ boot.remove(); }, 900);
+  };
+  window.addEventListener('saphira:load', (e:any)=>{
+    if(e.detail?.error){
+      if(status) status.textContent='3D model failed to load';
+      setTimeout(hide, 1800);
+      return;
+    }
+    if(typeof e.detail?.pct==='number') setPct(e.detail.pct);
+    if(e.detail?.done) setTimeout(hide, 450);
+  });
+  // safety: never trap the user behind the overlay if the load event is eaten
+  setTimeout(hide, 25000);
+  if(window.saphiraDesktop){
+    // brain state from the desktop (llm:status survives missed early events)
+    void window.saphiraDesktop.llmStatus().then((st)=>{
+      const m=st.models.find((x)=>x.id===st.activeId);
+      if(m && (m.state==='loading'||m.state==='downloading')){
+        setBrain(m.state==='downloading'
+          ? `downloading her brain — ${Math.round((m.progress??0)*100)}%`
+          : 'waking her brain on this PC…');
+      }
+    }).catch(()=>{});
+    window.saphiraDesktop.onLlmEvent((e)=>{
+      if(e.type==='progress') setBrain(`downloading her brain — ${Math.round((e.progress??0)*100)}%`);
+      else if(e.state==='loading') setBrain(e.error ? String(e.error).slice(0,90) : 'waking her brain on this PC…');
+      else if(e.state==='ready'){ setBrain('her brain is ready'); setTimeout(()=>setBrain(''), 2500); }
+      else if(e.state==='error') setBrain(String(e.error||'her brain hit an error').slice(0,90));
+      // mid-session brain wake-ups (restart, switch, idle park) surface as a
+      // pill so the chat stays usable while she loads
+      if(e.state==='loading') flashLive('Waking her brain… first load can take a minute', 8000);
+      if(e.state==='error') flashLive(String(e.error||'Brain error').slice(0,90), 8000);
+    });
+  }
+}
+setupBoot();
 
 // demo deep-link: ?piano=1 auto-triggers a performance once she's loaded
 try{
