@@ -8,6 +8,7 @@
     "email": "touhidsiddiqueeraj@gmail.com"
   },
   "homepage": "https://github.com/touhidsiddiqueeraj-bit/Saphira-Air#readme",
+  "desktopName": "Saphira",
   "type": "module",
   "main": "build/desktop/main.js",
   "scripts": {
@@ -17,7 +18,8 @@
     "desktop:dev": "node scripts/desktop-dev.mjs",
     "desktop:build": "npm run build && npm run desktop:main",
     "desktop:package": "npm run desktop:build && node scripts/prune-platform.mjs linux && electron-builder --linux AppImage deb",
-    "desktop:package:win": "npm run desktop:build && node scripts/prune-platform.mjs win && electron-builder --win nsis"
+    "desktop:package:win": "npm run desktop:build && node scripts/prune-platform.mjs win && electron-builder --win nsis",
+    "desktop:package:mac": "npm run desktop:build && node scripts/prune-platform.mjs darwin && node scripts/install-mac-x64-sharp.mjs && electron-builder --mac dmg --arm64 --x64"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

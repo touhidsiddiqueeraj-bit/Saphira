@@ -1,8 +1,13 @@
 name: Release
 
-# CD: build the Linux desktop packages (AppImage + deb) whenever a v* tag is
-# pushed, attach them to a GitHub Release. Windows .exe builds can be added
-# later with a windows-latest twin job running `npm run desktop:package:win`.
+# CD: build Saphira installers for all three desktop platforms whenever a v*
+# tag is pushed, then bundle everything into one GitHub Release:
+#   - Linux   (ubuntu-latest)  → AppImage + .deb
+#   - Windows (windows-latest)  → NSIS installer (.exe)
+#   - macOS   (macos-latest)    → DMG for Apple Silicon AND Intel
+# The AI payloads (llama-server, GGUF models, voices) are downloaded by the
+# app on first run, so installers stay small and platform binaries are pruned
+# before packaging (scripts/prune-platform.mjs).
 
 on:
   push:
@@ -13,9 +18,25 @@ permissions:
   contents: write
 
 jobs:
-  linux:
-    name: Build Linux packages
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.name }} packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            platform: linux
+            package: npx electron-builder --linux AppImage deb
+          - name: Windows
+            os: windows-latest
+            platform: win
+            package: npx electron-builder --win nsis x64
+          - name: macOS
+            os: macos-latest
+            platform: darwin
+            package: npx electron-builder --mac dmg --arm64 --x64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,29 +50,82 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
         env:
-          # electron's postinstall only downloads a binary we don't need for
-          # packaging — electron-builder fetches its own copies
+          # electron's postinstall downloads a runtime binary we don't need
+          # for packaging — electron-builder fetches its own per-arch copies
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
       - name: Build renderer + electron main
         run: npm run desktop:build
 
-      - name: Prune natives + package (AppImage, deb)
-        run: node scripts/prune-platform.mjs linux && npx electron-builder --linux AppImage deb
+      - name: Prune natives to ${{ matrix.platform }}
+        run: node scripts/prune-platform.mjs ${{ matrix.platform }}
+
+      # On an Apple-Silicon runner npm installs arm64 sharp binaries only;
+      # the Intel DMG needs the x64 twins next to them.
+      - name: Add Intel (x64) sharp natives
+        if: matrix.platform == 'darwin'
+        run: node scripts/install-mac-x64-sharp.mjs
+
+      - name: Package (${{ matrix.name }})
+        run: ${{ matrix.package }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # no Apple Developer certificate — ship unsigned, skip keychain probe
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Upload packages as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: saphira-linux
+          name: saphira-${{ matrix.platform }}
           path: release/*
           retention-days: 14
+          if-no-files-found: error
 
-      - name: Attach to GitHub Release
+  release:
+    name: Publish GitHub Release
+    needs: build
+    # only tag pushes publish a real Release; manual runs stop at artifacts
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform packages
+        uses: actions/download-artifact@v4
+        with:
+          path: packages
+          pattern: saphira-*
+          merge-multiple: true
+
+      - name: List what will be attached
+        run: ls -la packages/
+
+      - name: Create GitHub Release with all installers
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*
+          files: |
+            packages/*.exe
+            packages/*.dmg
+            packages/*.AppImage
+            packages/*.deb
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            **Saphira ${{
+              github.ref_name }}** — desktop companion with fully-local AI (brain, voice, ears).
+
+            | Platform | File | Notes |
+            |---|---|---|
+            | Windows | `Saphira-Setup-*-x64.exe` | SmartScreen may warn (unsigned build) → *More info → Run anyway* |
+            | macOS (Apple Silicon) | `Saphira-*-mac-arm64.dmg` | Unsigned → right-click the app → **Open** the first time |
+            | macOS (Intel) | `Saphira-*-mac-x64.dmg` | Same first-run bypass as above |
+            | Linux | `Saphira-*-linux-x64.AppImage` | `chmod +x` then run |
+            | Linux (Debian/Ubuntu) | `Saphira-*-linux-x64.deb` | `sudo apt install ./Saphira-*-linux-x64.deb` |
+
+            **First run:** she downloads her AI payloads on first use with a
+            progress screen (llama-server engine ~18 MB, the brain 2–5 GB,
+            voice + ears ~500 MB) — after that she is fully offline.
+
+            **Highlights of this build**
+            - Memory-safe brain loading (VRAM-aware GPU offload, RAM preflight,
+              OOM watchdog) — no more whole-machine freezes/shutdowns
+            - Loading screen with live progress while models download/wake
+            - Faster replies: warm-started brain, leaner context, busy feedback
+            - Vision (photos), push-to-talk fixes, and more

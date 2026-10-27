@@ -27,20 +27,23 @@
 
 ## Install
 
-### Linux
+Grab the installer for your OS from [Releases](../../releases/latest) — she ships for **Windows, macOS (Apple Silicon + Intel) and Linux**:
 
-Download `Saphira-1.0.0.AppImage` from [Releases](../../releases), then:
+| Platform | File | How |
+|---|---|---|
+| Windows | `Saphira-Setup-*-x64.exe` | Run it — SmartScreen may warn on the unsigned build: *More info → Run anyway* |
+| macOS (Apple Silicon) | `Saphira-*-mac-arm64.dmg` | Drag to Applications, then right-click the app → **Open** the first time (unsigned build) |
+| macOS (Intel) | `Saphira-*-mac-x64.dmg` | Same first-run bypass as above |
+| Linux | `Saphira-*-linux-x86_64.AppImage` | `chmod +x` then run |
+| Linux (Debian/Ubuntu) | `Saphira-*-linux-amd64.deb` | `sudo apt install ./Saphira-*-linux-amd64.deb` |
 
-```bash
-chmod +x Saphira-1.0.0.AppImage
-./Saphira-1.0.0.AppImage
-```
+The installers are small — her AI payloads (llama-server engine, brain, voice, ears) download on first use with a progress screen, and after that she is fully offline.
 
-Add it to your app launcher / taskbar:
+### Linux launcher entry (AppImage)
 
 ```bash
 mkdir -p ~/.local/share/saphira-desktop ~/.local/share/icons/hicolor/512x512/apps ~/.local/share/applications
-cp Saphira-1.0.0.AppImage ~/.local/share/saphira-desktop/Saphira.AppImage
+cp Saphira-*-linux-x86_64.AppImage ~/.local/share/saphira-desktop/Saphira.AppImage
 cp docs/icon.png ~/.local/share/icons/hicolor/512x512/apps/saphira-desktop.png
 cat > ~/.local/share/applications/saphira-desktop.desktop <<'EOF'
 [Desktop Entry]
@@ -56,11 +59,7 @@ EOF
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
 ```
 
-(`.deb` and Windows `.exe` installers are also in Releases.)
-
-### Windows
-
-Run `Saphira Setup 1.0.0.exe`. The local-brain runtime downloads itself on first use.
+(The `.deb` registers its menu entry and icons automatically.)
 
 ## Give her a brain
 
@@ -87,9 +86,10 @@ npm install
 npm run desktop:dev        # dev server + electron window
 npm run desktop:package    # → release/: AppImage + deb (Linux)
 npm run desktop:package:win
+npm run desktop:package:mac # → release/: arm64 + x64 DMGs (on macOS)
 ```
 
-CI runs on every push (build + typecheck), CodeQL scans the codebase weekly, and pushing a `v*` tag builds and publishes the installers — see `.github/workflows/`.
+CI runs on every push (build + typecheck), CodeQL scans the codebase weekly, and pushing a `v*` tag builds the **Windows, macOS and Linux** installers and publishes them to a GitHub Release — see `.github/workflows/`.
 
 Requirements: Node 20+, ~2 GB disk for dependencies. GPU acceleration is automatic — she detects Vulkan/CUDA devices via llama.cpp and offloads all layers; a CPU-only llama-server is downloaded as fallback.
 

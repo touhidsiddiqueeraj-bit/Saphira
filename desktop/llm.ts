@@ -133,10 +133,16 @@ function writeActiveId(id: string | null): void {
 
 // ---------- llama-server binary management ----------
 
+// official llama.cpp release asset for this OS/arch — see
+// https://github.com/ggml-org/llama.cpp/releases (llama-bN-bin-*)
 function platformAsset(): { asset: RegExp; kind: 'tar.gz' | 'zip' } {
-  return process.platform === 'win32'
-    ? { asset: /llama-b\d+-bin-win-cpu-x64\.zip$/, kind: 'zip' }
-    : { asset: /llama-b\d+-bin-ubuntu-x64\.tar\.gz$/, kind: 'tar.gz' };
+  if (process.platform === 'win32') return { asset: /llama-b\d+-bin-win-cpu-x64\.zip$/, kind: 'zip' };
+  if (process.platform === 'darwin') {
+    return process.arch === 'arm64'
+      ? { asset: /llama-b\d+-bin-macos-arm64\.tar\.gz$/, kind: 'tar.gz' }
+      : { asset: /llama-b\d+-bin-macos-x64\.tar\.gz$/, kind: 'tar.gz' };
+  }
+  return { asset: /llama-b\d+-bin-ubuntu-x64\.tar\.gz$/, kind: 'tar.gz' };
 }
 
 async function latestBinaryAsset(): Promise<{ url: string; name: string }> {
@@ -172,7 +178,8 @@ function findFile(root: string, name: string): string | null {
 }
 
 const ENGINE_CANDIDATES = () => [
-  path.join(process.env.HOME || '', 'llama.cpp', 'build', 'bin', 'llama-server' + (process.platform === 'win32' ? '.exe' : '')),
+  // os.homedir(), not $HOME — HOME is usually unset on Windows
+  path.join(os.homedir(), 'llama.cpp', 'build', 'bin', 'llama-server' + (process.platform === 'win32' ? '.exe' : '')),
 ];
 
 let engineBinary: string | null = null;

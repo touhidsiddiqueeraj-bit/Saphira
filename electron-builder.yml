@@ -12,6 +12,7 @@ asarUnpack:
   - "node_modules/@huggingface/transformers/**"
   - "node_modules/sharp/**"
   - "node_modules/@img/**"
+# native modules ship prebuilt binaries (onnxruntime-node, sharp) — no rebuild
 npmRebuild: false
 linux:
   target:
@@ -19,6 +20,18 @@ linux:
     - deb
   category: Utility
   synopsis: Saphira — anime companion with fully-local AI
+  syncDesktopName: true
+  artifactName: Saphira-${version}-linux-${arch}.${ext}
 win:
   target:
     - nsis
+  artifactName: Saphira-Setup-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.entertainment
+  artifactName: Saphira-${version}-mac-${arch}.${ext}
