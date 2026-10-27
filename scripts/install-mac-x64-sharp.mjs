@@ -19,4 +19,6 @@ if (!specs.length) {
 
 const args = specs.map(([n, v]) => `${n}@${v}`).join(' ');
 console.log('installing', args);
-execSync(`npm install --no-save --no-audit --no-fund ${args}`, { stdio: 'inherit' });
+// --force: npm refuses foreign-arch binaries (EBADPLATFORM) without it;
+// existing arm64 natives are left untouched
+execSync(`npm install --no-save --no-audit --no-fund --force ${args}`, { stdio: 'inherit' });

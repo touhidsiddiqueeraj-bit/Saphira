@@ -27,15 +27,15 @@ jobs:
           - name: Linux
             os: ubuntu-latest
             platform: linux
-            package: npx electron-builder --linux AppImage deb
+            package: npx electron-builder --linux AppImage deb --publish never
           - name: Windows
             os: windows-latest
             platform: win
-            package: npx electron-builder --win nsis x64
+            package: npx electron-builder --win nsis --x64 --publish never
           - name: macOS
             os: macos-latest
             platform: darwin
-            package: npx electron-builder --mac dmg --arm64 --x64
+            package: npx electron-builder --mac dmg --arm64 --x64 --publish never
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
